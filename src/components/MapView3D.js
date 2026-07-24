@@ -6,8 +6,8 @@ import React, {
   useCallback,
 } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { LIFT_COORDINATES } from "../constants";
 
