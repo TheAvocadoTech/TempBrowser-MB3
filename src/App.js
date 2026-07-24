@@ -2,7 +2,7 @@ import React, { useEffect, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setFloor, updateLiveLocation, setActiveRoute } from './store/floorSlice';
 import Header from './components/Header';
-import MapView3D from './components/MapView3D';
+import MapView2D from './components/MapView2D';
 import CommonButton from './components/CommonButton';
 import { getVisitorLocation, getNavigationRoute, getMapDetails } from './services/api';
 import { LIFT_COORDINATES } from './constants';
@@ -105,9 +105,9 @@ export default function App() {
         {/* Header Section */}
         <Header />
 
-        {/* Integrated 3D Metric Navigation Map View */}
+        {/* 2D Interactive SVG Navigation Map View */}
         <main className="main-map-section">
-          <MapView3D
+          <MapView2D
             floor={activeFloor}
             onFloorChange={handleFloorChange}
             mapDetails={mapMeta}
