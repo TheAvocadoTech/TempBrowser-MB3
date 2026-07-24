@@ -42,7 +42,7 @@ export default function MapView2D({
   distance,
   proximity,
 }) {
-  // Zoomed-in to 1.7x and panned -280px left to hide unused white area and show the right map edge
+  // Zoomed-in to 1.7x and panned -150px left to hide unused white area and show the right map edge
   const [zoom, setZoom] = useState(1.7);
   const [pan, setPan] = useState({ x: -150, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -315,7 +315,7 @@ export default function MapView2D({
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.35, 0.7));
   const handleResetZoom = () => {
     setZoom(1.7);
-    setPan({ x: -280, y: 0 });
+    setPan({ x: -150, y: 0 });
   };
 
   const handleMouseDown = (e) => {
@@ -380,15 +380,16 @@ export default function MapView2D({
         }}
       >
         <defs>
+          {/* Small sleek arrow head marker */}
           <marker
             id="routeArrow"
-            markerWidth="6"
-            markerHeight="6"
-            refX="4"
-            refY="3"
+            markerWidth="3"
+            markerHeight="3"
+            refX="2"
+            refY="1.5"
             orient="auto"
           >
-            <path d="M 0 0 L 6 3 L 0 6 z" fill="#0085ff" />
+            <path d="M 0 0 L 3 1.5 L 0 3 z" fill="#0085ff" />
           </marker>
 
           <pattern
@@ -487,14 +488,14 @@ export default function MapView2D({
           );
         })}
 
-        {/* 5. Active Animated Navigation Route Path */}
+        {/* 5. Active Sleek Thin Animated Navigation Route Path */}
         {routePathD && (
           <g>
             <path
               d={routePathD}
               fill="none"
-              stroke="rgba(0, 133, 255, 0.25)"
-              strokeWidth="14"
+              stroke="rgba(0, 133, 255, 0.2)"
+              strokeWidth="6"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -502,7 +503,7 @@ export default function MapView2D({
               d={routePathD}
               fill="none"
               stroke="#0085ff"
-              strokeWidth="7"
+              strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
               markerEnd="url(#routeArrow)"
@@ -511,9 +512,9 @@ export default function MapView2D({
               d={routePathD}
               fill="none"
               stroke="#ffffff"
-              strokeWidth="2.5"
+              strokeWidth="1.2"
               strokeLinecap="round"
-              strokeDasharray="6 6"
+              strokeDasharray="4 4"
               className="path-animated"
             />
           </g>
