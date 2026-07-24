@@ -1,14 +1,15 @@
 import axios from "axios";
 
 // Base URL points to live backend API at api.avocadotech.in
-const API_BASE_URL = process.env.REACT_APP_API_URL || "https://api.avocadotech.in/api/IDVisitor";
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || "https://api.avocadotech.in/api/IDVisitor";
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
   headers: {
-    "Content-Type": "application/json"
-  }
+    "Content-Type": "application/json",
+  },
 });
 
 let cachedVisitorId = null;
@@ -80,7 +81,8 @@ export const getVisitorLocation = async (visitorId = "current") => {
       }
     }
 
-    const isValidMongoId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
+    const isValidMongoId = (id) =>
+      typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
 
     // 2. Resolve cached or active visitor ID if targetId is still not valid Mongo ID
     if (!isValidMongoId(targetId)) {
@@ -88,8 +90,14 @@ export const getVisitorLocation = async (visitorId = "current") => {
         targetId = cachedVisitorId;
       } else {
         const visitorsRes = await getAllVisitors();
-        if (visitorsRes?.data && Array.isArray(visitorsRes.data) && visitorsRes.data.length > 0) {
-          const activeVisitor = visitorsRes.data.find(v => v.idNumber || v._id) || visitorsRes.data[0];
+        if (
+          visitorsRes?.data &&
+          Array.isArray(visitorsRes.data) &&
+          visitorsRes.data.length > 0
+        ) {
+          const activeVisitor =
+            visitorsRes.data.find((v) => v.idNumber || v._id) ||
+            visitorsRes.data[0];
           targetId = activeVisitor._id || activeVisitor.id;
           cachedVisitorId = targetId;
         }
@@ -101,12 +109,20 @@ export const getVisitorLocation = async (visitorId = "current") => {
       targetId = "6a624b4560e3cc3ce7496ccd";
     }
 
-    const response = await apiClient.get(`/visitors/${targetId}/location?includePath=true`);
+    const response = await apiClient.get(
+      `/visitors/${targetId}/location?includePath=true`,
+    );
     return response.data;
   } catch (error) {
-    if (error.response && error.response.status === 500 && visitorId !== "6a624b4560e3cc3ce7496ccd") {
+    if (
+      error.response &&
+      error.response.status === 500 &&
+      visitorId !== "6a624b4560e3cc3ce7496ccd"
+    ) {
       try {
-        const fallbackRes = await apiClient.get(`/visitors/6a624b4560e3cc3ce7496ccd/location?includePath=true`);
+        const fallbackRes = await apiClient.get(
+          `/visitors/6a624b4560e3cc3ce7496ccd/location?includePath=true`,
+        );
         return fallbackRes.data;
       } catch (fallbackErr) {
         return { success: false, message: fallbackErr.message, data: null };
@@ -115,7 +131,7 @@ export const getVisitorLocation = async (visitorId = "current") => {
     return {
       success: false,
       message: error.message || "Failed to fetch visitor location",
-      data: null
+      data: null,
     };
   }
 };
@@ -139,7 +155,7 @@ export const getMapDetails = async (mapId) => {
 export const getNavigationRoute = async (mapId, fromX, fromY, toX, toY) => {
   try {
     const response = await apiClient.get(
-      `/maps/${mapId}/route?fromX=${fromX}&fromY=${fromY}&toX=${toX}&toY=${toY}`
+      `/maps/${mapId}/route?fromX=${fromX}&fromY=${fromY}&toX=${toX}&toY=${toY}`,
     );
     return response.data;
   } catch (error) {

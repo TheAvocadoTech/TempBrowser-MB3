@@ -1,11 +1,19 @@
-import React, { useEffect, useCallback } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
-import { setFloor, updateLiveLocation, setActiveRoute } from './store/floorSlice';
-import Header from './components/Header';
-import MapView2D from './components/MapView2D';
-import CommonButton from './components/CommonButton';
-import { getVisitorLocation, getNavigationRoute, getMapDetails } from './services/api';
-import { LIFT_COORDINATES } from './constants';
+import React, { useEffect, useCallback } from "react";
+import { useSelector, useDispatch } from "react-redux";
+import {
+  setFloor,
+  updateLiveLocation,
+  setActiveRoute,
+} from "./store/floorSlice";
+import Header from "./components/Header";
+import MapView2D from "./components/MapView2D";
+import CommonButton from "./components/CommonButton";
+import {
+  getVisitorLocation,
+  getNavigationRoute,
+  getMapDetails,
+} from "./services/api";
+import { LIFT_COORDINATES } from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
@@ -27,9 +35,19 @@ export default function App() {
         const defaultMapId = "cfa55e13-794f-4081-b1b7-e35f1ea67325";
         const mapRes = await getMapDetails(defaultMapId);
         if (mapRes && mapRes.data) {
-          dispatch(updateLiveLocation({ map: mapRes.data, wayfinding_path: mapRes.data.wayfinding_path }));
+          dispatch(
+            updateLiveLocation({
+              map: mapRes.data,
+              wayfinding_path: mapRes.data.wayfinding_path,
+            }),
+          );
         } else if (mapRes) {
-          dispatch(updateLiveLocation({ map: mapRes, wayfinding_path: mapRes.wayfinding_path }));
+          dispatch(
+            updateLiveLocation({
+              map: mapRes,
+              wayfinding_path: mapRes.wayfinding_path,
+            }),
+          );
         }
       } catch (err) {
         console.warn("Map details init notice:", err.message);
@@ -42,7 +60,7 @@ export default function App() {
   // 2. Fetch real-time BLE location for active visitor
   const fetchRealtimeLocation = useCallback(async () => {
     try {
-      const data = await getVisitorLocation('current');
+      const data = await getVisitorLocation("current");
 
       if (data && (data.success || data.location)) {
         dispatch(updateLiveLocation(data));
@@ -50,21 +68,35 @@ export default function App() {
         const responseData = data.data || data;
         const bleX = responseData?.location?.x;
         const bleY = responseData?.location?.y;
-        const mapId = responseData?.location?.map_id || "cfa55e13-794f-4081-b1b7-e35f1ea67325";
+        const mapId =
+          responseData?.location?.map_id ||
+          "cfa55e13-794f-4081-b1b7-e35f1ea67325";
 
         let finalX, finalY;
-        if (activeFloor === 'GR') {
+        if (activeFloor === "GR") {
           finalX = LIFT_COORDINATES.x;
           finalY = LIFT_COORDINATES.y;
         } else {
-          finalX = responseData?.target_coordinates?.x || 5525.30;
+          finalX = responseData?.target_coordinates?.x || 5525.3;
           finalY = responseData?.target_coordinates?.y || 2491.84;
         }
 
         // Calculate navigation route
-        if (mapId && bleX !== undefined && bleY !== undefined && finalX !== undefined && finalY !== undefined) {
+        if (
+          mapId &&
+          bleX !== undefined &&
+          bleY !== undefined &&
+          finalX !== undefined &&
+          finalY !== undefined
+        ) {
           try {
-            const routeRes = await getNavigationRoute(mapId, bleX, bleY, finalX, finalY);
+            const routeRes = await getNavigationRoute(
+              mapId,
+              bleX,
+              bleY,
+              finalX,
+              finalY,
+            );
             if (routeRes && routeRes.route) {
               dispatch(setActiveRoute(routeRes.route));
             }
@@ -96,7 +128,7 @@ export default function App() {
   };
 
   const handleCommonButtonClick = () => {
-    console.log('Common action clicked');
+    console.log("Common action clicked");
   };
 
   return (

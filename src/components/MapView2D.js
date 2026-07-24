@@ -18,10 +18,10 @@ import { LIFT_COORDINATES } from "../constants";
  */
 export const FLOORPLAN_CALIBRATION = {
   GR: {
-    rotation: 270, // Degrees (0, 90, 180, 270)
-    scale: 3.2, // Scale multiplier (1.0 = default fit)
-    offsetX: 550, // Shift X in SVG pixels
-    offsetY: 750, // Shift Y in SVG pixels
+    rotation: 0, // Degrees (0, 90, 180, 270)
+    scale: 0.9, // Scale multiplier (1.0 = default fit)
+    offsetX: 35, // Shift X in SVG pixels
+    offsetY: 0, // Shift Y in SVG pixels
   },
   F1: {
     rotation: 270, // Degrees (0, 90, 180, 270)
@@ -43,8 +43,8 @@ export default function MapView2D({
   proximity,
 }) {
   // Zoomed-in to 1.7x and panned -150px left to hide unused white area and show the right map edge
-  const [zoom, setZoom] = useState(1.7);
-  const [pan, setPan] = useState({ x: -150, y: 0 });
+  const [zoom, setZoom] = useState(3.2);
+  const [pan, setPan] = useState({ x: -320, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [renderedPdfImage, setRenderedPdfImage] = useState({
@@ -536,7 +536,7 @@ export default function MapView2D({
               <rect
                 x="-75"
                 y="-12"
-                width="150"
+                width="100"
                 height="22"
                 rx="11"
                 fill="#0085ff"
@@ -551,7 +551,8 @@ export default function MapView2D({
                 fontWeight="900"
                 textAnchor="middle"
               >
-                📍 LIVE: ({Math.round(displayBleX)}, {Math.round(displayBleY)})
+                📍 LIVE LOCATION
+                {/* ({Math.round(displayBleX)}, {Math.round(displayBleY)}) */}
               </text>
             </g>
           </g>
@@ -564,35 +565,35 @@ export default function MapView2D({
               // GR Floor: Lift Target
               <g>
                 <circle
-                  r="24"
+                  r="10"
                   fill="#9333ea"
                   opacity="0.25"
                   className="ble-pulse-aura"
                 />
                 <circle
-                  r="13"
+                  r="7"
                   fill="#9333ea"
                   stroke="#ffffff"
-                  strokeWidth="3"
+                  strokeWidth="1.8"
                 />
                 <text
                   x="0"
-                  y="4"
+                  y="2.5"
                   fill="#ffffff"
-                  fontSize="11"
+                  fontSize="7.5"
                   fontWeight="900"
                   textAnchor="middle"
                 >
                   🛗
                 </text>
 
-                <g transform="translate(0, 32)">
+                <g transform="translate(0, 20)">
                   <rect
-                    x="-85"
-                    y="-12"
-                    width="170"
-                    height="22"
-                    rx="11"
+                    x="-70"
+                    y="-10"
+                    width="140"
+                    height="18"
+                    rx="9"
                     fill="#9333ea"
                     stroke="#ffffff"
                     strokeWidth="1.5"
@@ -605,8 +606,9 @@ export default function MapView2D({
                     fontWeight="900"
                     textAnchor="middle"
                   >
-                    🛗 FINAL (LIFT): ({Math.round(LIFT_COORDINATES.x)},{" "}
-                    {Math.round(LIFT_COORDINATES.y)})
+                    🛗 FINAL (LIFT)
+                    {/* ({Math.round(LIFT_COORDINATES.x)},{" "}
+                    {Math.round(LIFT_COORDINATES.y)}) */}
                   </text>
                 </g>
               </g>
@@ -646,7 +648,8 @@ export default function MapView2D({
                     fontWeight="900"
                     textAnchor="middle"
                   >
-                    🎯 FINAL (CABINET): (
+                    🎯 FINAL (CABINET)
+                    {/* : (
                     {targetCoordinates?.x
                       ? Math.round(targetCoordinates.x)
                       : "5525"}
@@ -654,7 +657,7 @@ export default function MapView2D({
                     {targetCoordinates?.y
                       ? Math.round(targetCoordinates.y)
                       : "2492"}
-                    )
+                    ) */}
                   </text>
                 </g>
               </g>
