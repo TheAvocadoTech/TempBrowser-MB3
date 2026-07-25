@@ -11,6 +11,7 @@ import {
   F1_LIFT_COORDINATES,
   CABINET_COORDINATES,
   TEMP_DOT_COORDINATES,
+  GR_PROPOSED_START_COORDINATES,
 } from "../constants";
 
 /**
@@ -336,6 +337,54 @@ export default function MapView2D({
     transformCoords,
   ]);
 
+  // SVG Proposed Ground Floor Route Path String (Light Blue)
+  // Sequence: Proposed Start Point (right of N9) -> N9 -> N13 -> Lift
+  const proposedRoutePathD = useMemo(() => {
+    if (floor !== "GR") return "";
+
+    const points = [];
+
+    // 1. Proposed Start Point (right of N9)
+    const proposedStartPt = transformCoords(
+      GR_PROPOSED_START_COORDINATES.x,
+      GR_PROPOSED_START_COORDINATES.y,
+    );
+    points.push(proposedStartPt);
+
+    // 2. N9 Node
+    const n9Node = allGraphNodes.find(
+      (n) => n.name && (n.name.toUpperCase() === "N9" || n.name === "9"),
+    );
+    if (n9Node && n9Node.position) {
+      points.push(transformCoords(n9Node.position.x, n9Node.position.y));
+    } else {
+      points.push(transformCoords(5854.67, 3646.69));
+    }
+
+    // 3. N13 Node
+    const n13Node = allGraphNodes.find(
+      (n) => n.name && (n.name.toUpperCase() === "N13" || n.name === "13"),
+    );
+    if (n13Node && n13Node.position) {
+      points.push(transformCoords(n13Node.position.x, n13Node.position.y));
+    } else {
+      points.push(transformCoords(6362.34, 3470.36));
+    }
+
+    // 4. GR Lift Target
+    if (destPos) {
+      points.push(destPos);
+    }
+
+    if (points.length < 2) return "";
+
+    return points.reduce((acc, pt, idx) => {
+      return idx === 0
+        ? `M ${pt.svgX} ${pt.svgY}`
+        : `${acc} L ${pt.svgX} ${pt.svgY}`;
+    }, "");
+  }, [floor, allGraphNodes, destPos, transformCoords]);
+
   // Build Edge Lines Array for full graph mesh rendering
   const fullEdgeLines = useMemo(() => {
     if (!allGraphNodes || allGraphNodes.length === 0) return [];
@@ -481,6 +530,18 @@ export default function MapView2D({
             <path d="M 0 0 L 3 1.5 L 0 3 z" fill="#0085ff" />
           </marker>
 
+          {/* Light Blue arrow head marker for proposed path */}
+          <marker
+            id="proposedRouteArrow"
+            markerWidth="3"
+            markerHeight="3"
+            refX="2"
+            refY="1.5"
+            orient="auto"
+          >
+            <path d="M 0 0 L 3 1.5 L 0 3 z" fill="#062835" />
+          </marker>
+
           <pattern
             id="gridPattern"
             width="40"
@@ -530,8 +591,8 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 3. Graph Corridor Connection Lines */}
-        {fullEdgeLines.map((edge) => (
+        {/* 3. Graph Corridor Connection Lines (Commented out for clean visual map) */}
+        {/* {fullEdgeLines.map((edge) => (
           <line
             key={edge.key}
             x1={edge.x1}
@@ -542,10 +603,10 @@ export default function MapView2D({
             strokeWidth="2"
             strokeDasharray="4 4"
           />
-        ))}
+        ))} */}
 
-        {/* 4. Graph Wayfinding Nodes (Strictly isolated per active floor) */}
-        {allGraphNodes.map((node, idx) => {
+        {/* 4. Graph Wayfinding Nodes (Commented out for clean visual map) */}
+        {/* {allGraphNodes.map((node, idx) => {
           if (!node.position) return null;
           const { svgX, svgY } = transformCoords(
             node.position.x,
@@ -575,12 +636,51 @@ export default function MapView2D({
               )}
             </g>
           );
-        })}
+        })} */}
 
         {/* Temp Dot Marker on F1 */}
         {floor === "F1" && tempDotPos && (
           <g transform={`translate(${tempDotPos.svgX}, ${tempDotPos.svgY})`}>
             <circle r="4" fill="#0085ff" stroke="#ffffff" strokeWidth="1.2" />
+          </g>
+        )}
+
+        {/* Proposed Start Dot on GR */}
+        {floor === "GR" && (
+          <g
+            transform={`translate(${transformCoords(GR_PROPOSED_START_COORDINATES.x, GR_PROPOSED_START_COORDINATES.y).svgX}, ${transformCoords(GR_PROPOSED_START_COORDINATES.x, GR_PROPOSED_START_COORDINATES.y).svgY})`}
+          >
+            <circle
+              r="6"
+              fill="#38bdf8"
+              opacity="0.4"
+              className="ble-pulse-aura"
+            />
+            <circle r="4" fill="#38bdf8" stroke="#ffffff" strokeWidth="0.8" />
+          </g>
+        )}
+
+        {/* Proposed Light Blue Future Path on Ground Floor */}
+        {floor === "GR" && proposedRoutePathD && (
+          <g>
+            <path
+              d={proposedRoutePathD}
+              fill="none"
+              stroke="rgba(56, 189, 248, 0.25)"
+              strokeWidth="6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d={proposedRoutePathD}
+              fill="none"
+              stroke="#062835"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="6 6"
+              markerEnd="url(#proposedRouteArrow)"
+            />
           </g>
         )}
 

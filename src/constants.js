@@ -19,11 +19,18 @@ export const CABINET_COORDINATES = {
   label: "Backend Cabinet Destination",
 };
 
-// Hardcoded Temp Dot coordinates for F1 Path (Lift -> N12 -> Temp Dot -> Cabinet)
+// Hardcoded Temp Dot coordinates for F1 Path (Lift -> N48 -> Temp Dot -> Cabinet)
 export const TEMP_DOT_COORDINATES = {
   x: 5480.0,
   y: 2200.84,
   label: "Temp Intermediate Node",
+};
+
+// Hardcoded Proposed Start coordinates on right side of N9 for Ground Floor (GR) path
+export const GR_PROPOSED_START_COORDINATES = {
+  x: 5700.0,
+  y: 1448.69,
+  label: "Proposed Path Start Point (Right of N9)",
 };
 
 // Separate Floor Map IDs from Juniper Mist API
