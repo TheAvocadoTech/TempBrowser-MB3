@@ -2,6 +2,7 @@ import React, { useEffect, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
   setFloor,
+  setFloorMapDetails,
   updateLiveLocation,
   setActiveRoute,
 } from "./store/floorSlice";
@@ -11,8 +12,14 @@ import CommonButton from "./components/CommonButton";
 import {
   getVisitorLocation,
   getNavigationRoute,
+  getMapDetails,
 } from "./services/api";
-import { LIFT_COORDINATES, CABINET_COORDINATES } from "./constants";
+import {
+  LIFT_COORDINATES,
+  F1_LIFT_COORDINATES,
+  CABINET_COORDINATES,
+  FLOOR_MAP_IDS,
+} from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
@@ -23,9 +30,51 @@ export default function App() {
   const targetPos = useSelector((state) => state.floor.targetPos);
   const mapMeta = useSelector((state) => state.floor.mapMeta);
   const wayfindingData = useSelector((state) => state.floor.wayfindingData);
+  const floorMapData = useSelector((state) => state.floor.floorMapData);
   const activeRoute = useSelector((state) => state.floor.activeRoute);
   const distance = useSelector((state) => state.floor.distance);
   const proximity = useSelector((state) => state.floor.proximity);
+
+  // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
+  useEffect(() => {
+    const fetchFloorMaps = async () => {
+      // 1. Fetch GR Floor Map (MB3-F00: 8 nodes)
+      try {
+        const grRes = await getMapDetails(FLOOR_MAP_IDS.GR);
+        if (grRes && (grRes.data || grRes.id)) {
+          const grData = grRes.data || grRes;
+          dispatch(
+            setFloorMapDetails({
+              floor: "GR",
+              mapMeta: grData,
+              wayfindingData: grData.wayfinding_path,
+            }),
+          );
+        }
+      } catch (err) {
+        console.warn("GR Map init notice:", err.message);
+      }
+
+      // 2. Fetch F1 Floor Map (MB3-F01: 37 nodes)
+      try {
+        const f1Res = await getMapDetails(FLOOR_MAP_IDS.F1);
+        if (f1Res && (f1Res.data || f1Res.id)) {
+          const f1Data = f1Res.data || f1Res;
+          dispatch(
+            setFloorMapDetails({
+              floor: "F1",
+              mapMeta: f1Data,
+              wayfindingData: f1Data.wayfinding_path,
+            }),
+          );
+        }
+      } catch (err) {
+        console.warn("F1 Map init notice:", err.message);
+      }
+    };
+
+    fetchFloorMaps();
+  }, [dispatch]);
 
   // Fetch real-time BLE location and wayfinding data for active visitor
   const fetchRealtimeLocation = useCallback(async () => {
@@ -38,21 +87,20 @@ export default function App() {
         const responseData = data.data || data;
         const bleX = responseData?.location?.x || 5004.59;
         const bleY = responseData?.location?.y || 2313.4;
-        const mapId =
-          responseData?.location?.map_id ||
-          "cfa55e13-794f-4081-b1b7-e35f1ea67325";
 
-        let fromX, fromY, finalX, finalY;
+        let mapId, fromX, fromY, finalX, finalY;
         if (activeFloor === "GR") {
-          // On GR, route starts from Live BLE location and goes to Lift:
+          // On GR, route starts from Live BLE location and goes to GR Lift:
+          mapId = FLOOR_MAP_IDS.GR;
           fromX = bleX;
           fromY = bleY;
           finalX = LIFT_COORDINATES.x;
           finalY = LIFT_COORDINATES.y;
         } else {
-          // On F1, route starts from Lift and goes to Cabinet:
-          fromX = LIFT_COORDINATES.x;
-          fromY = LIFT_COORDINATES.y;
+          // On F1, route starts from F1 Lift constant and goes to Cabinet:
+          mapId = FLOOR_MAP_IDS.F1;
+          fromX = F1_LIFT_COORDINATES.x;
+          fromY = F1_LIFT_COORDINATES.y;
           finalX = CABINET_COORDINATES.x;
           finalY = CABINET_COORDINATES.y;
         }
@@ -122,6 +170,7 @@ export default function App() {
             bleLocation={visitorPos}
             targetCoordinates={targetPos}
             wayfindingData={wayfindingData}
+            floorMapData={floorMapData}
             activeRoute={activeRoute}
             distance={distance}
             proximity={proximity}

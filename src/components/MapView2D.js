@@ -6,7 +6,12 @@ import React, {
   useEffect,
 } from "react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
-import { LIFT_COORDINATES, CABINET_COORDINATES } from "../constants";
+import {
+  LIFT_COORDINATES,
+  F1_LIFT_COORDINATES,
+  CABINET_COORDINATES,
+  TEMP_DOT_COORDINATES,
+} from "../constants";
 
 /**
  * 🎯 2D FLOORPLAN BACKGROUND ALIGNMENT CONFIGURATION (Per Floor)
@@ -20,14 +25,14 @@ export const FLOORPLAN_CALIBRATION = {
   GR: {
     rotation: 0, // Degrees (0, 90, 180, 270)
     scale: 0.9, // Scale multiplier (1.0 = default fit)
-    offsetX: 35, // Shift X in SVG pixels
+    offsetX: -15, // Shift X in SVG pixels
     offsetY: 0, // Shift Y in SVG pixels
   },
   F1: {
     rotation: 0, // Degrees (0, 90, 180, 270)
-    scale: 0.8, // Scale multiplier (1.0 = default fit)
-    offsetX: 20, // Shift X in SVG pixels
-    offsetY: -10, // Shift Y in SVG pixels
+    scale: 0.9, // Scale multiplier (1.0 = default fit)
+    offsetX: -12, // Shift X in SVG pixels
+    offsetY: 0, // Shift Y in SVG pixels
   },
 };
 
@@ -87,13 +92,14 @@ export default function MapView2D({
   bleLocation,
   targetCoordinates,
   wayfindingData,
+  floorMapData,
   activeRoute,
   distance,
   proximity,
 }) {
   // Zoomed-in to 3.2x and panned -320px left to hide unused white area and show the right map edge
-  const [zoom, setZoom] = useState(3.5);
-  const [pan, setPan] = useState({ x: -350, y: 0 });
+  const [zoom, setZoom] = useState(3.2);
+  const [pan, setPan] = useState({ x: -320, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [renderedPdfImage, setRenderedPdfImage] = useState({
@@ -106,12 +112,17 @@ export default function MapView2D({
   const SVG_WIDTH = 900;
   const SVG_HEIGHT = 600;
 
-  // Real Map Dimensions from Mist API (e.g. width: 6400, height: 5120)
-  const mapWidth = mapDetails?.width || 6400;
-  const mapHeight = mapDetails?.height || 5120;
+  // Active Floor Map Details & Wayfinding Data
+  const activeFloorData = floorMapData?.[floor] || {};
+  const activeMapMeta = activeFloorData.mapMeta || mapDetails;
+  const activeWayfinding = activeFloorData.wayfindingData || wayfindingData;
 
-  // Pixels Per Meter (PPM) resolution from Mist API map metadata
-  const ppm = mapDetails?.ppm || 50.07;
+  // Real Map Dimensions from Mist API (e.g. width: 6400, height: 5120)
+  const mapWidth = activeMapMeta?.width || 6400;
+  const mapHeight = activeMapMeta?.height || 5120;
+
+  // Pixels Per Meter (PPM) resolution from Mist API map metadata per floor
+  const ppm = activeMapMeta?.ppm || (floor === "GR" ? 50.07 : 57.28);
 
   // Calibration settings for current floor (GR or F1)
   const calib = FLOORPLAN_CALIBRATION[floor] || FLOORPLAN_CALIBRATION.GR;
@@ -173,10 +184,10 @@ export default function MapView2D({
   // Floorplan image URL priority: Rendered PDF Data URL -> Mist API URL -> Local PNG fallback
   const floorplanImageUrl = useMemo(() => {
     if (renderedPdfImage[floor]) return renderedPdfImage[floor];
-    if (mapDetails?.url) return mapDetails.url;
-    if (mapDetails?.image_url) return mapDetails.image_url;
+    if (activeMapMeta?.url) return activeMapMeta.url;
+    if (activeMapMeta?.image_url) return activeMapMeta.image_url;
     return floor === "GR" ? "/floorplans/GR.png" : "/floorplans/F1.png";
-  }, [renderedPdfImage, floor, mapDetails]);
+  }, [renderedPdfImage, floor, activeMapMeta]);
 
   // Calculate distance in meters
   const distanceInMeters = useMemo(() => {
@@ -186,16 +197,29 @@ export default function MapView2D({
   }, [distance, ppm]);
 
   /**
-   * Convert real-world/Mist coordinates (x, y) to SVG viewBox coordinates
+   * 🎯 UNIFORM 1:1 ASPECT RATIO COORDINATE CONVERTER
+   * Converts real-world Mist map coordinates (x, y) into SVG ViewBox coordinates
+   * maintaining exact 1:1 aspect ratio with zero spatial distortion.
    */
   const transformCoords = useCallback(
     (x, y) => {
       if (x === undefined || y === undefined || x === null || y === null) {
         return { svgX: SVG_WIDTH / 2, svgY: SVG_HEIGHT / 2 };
       }
-      const padding = 60;
-      const svgX = padding + (x / mapWidth) * (SVG_WIDTH - padding * 2);
-      const svgY = padding + (y / mapHeight) * (SVG_HEIGHT - padding * 2);
+      const padding = 50;
+      const scaleX = (SVG_WIDTH - padding * 2) / mapWidth;
+      const scaleY = (SVG_HEIGHT - padding * 2) / mapHeight;
+
+      // Uniform scale factor to prevent non-proportional stretching
+      const scale = Math.min(scaleX, scaleY);
+
+      // Centered offsets
+      const offsetX = (SVG_WIDTH - mapWidth * scale) / 2;
+      const offsetY = (SVG_HEIGHT - mapHeight * scale) / 2;
+
+      const svgX = offsetX + x * scale;
+      const svgY = offsetY + y * scale;
+
       return { svgX, svgY };
     },
     [mapWidth, mapHeight, SVG_WIDTH, SVG_HEIGHT],
@@ -208,11 +232,11 @@ export default function MapView2D({
     return transformCoords(rawX, rawY);
   }, [bleLocation, transformCoords]);
 
-  // Start Point SVG Coordinates: Live BLE for GR, Lift for F1
+  // Start Point SVG Coordinates: Live BLE for GR, F1_LIFT_COORDINATES for F1
   const startPos = useMemo(() => {
     if (floor === "F1") {
-      // On F1 floor, path starts from Lift
-      return transformCoords(LIFT_COORDINATES.x, LIFT_COORDINATES.y);
+      // On F1 floor, path starts from F1 Lift constant
+      return transformCoords(F1_LIFT_COORDINATES.x, F1_LIFT_COORDINATES.y);
     } else {
       // On GR floor, path starts from Live BLE location
       const rawX = bleLocation?.x ?? 5004.59;
@@ -231,60 +255,68 @@ export default function MapView2D({
     }
   }, [floor, transformCoords]);
 
-  // Extract ALL Real Wayfinding Nodes from mapDetails or wayfindingData
-  const allGraphNodes = useMemo(() => {
-    const rawNodes =
-      mapDetails?.wayfinding_path?.nodes ||
-      wayfindingData?.wayfinding_path?.nodes ||
-      wayfindingData?.nodes;
-    return normalizeGraphNodes(rawNodes);
-  }, [mapDetails, wayfindingData]);
+  // Temp Dot SVG Coordinates for F1
+  const tempDotPos = useMemo(() => {
+    return transformCoords(TEMP_DOT_COORDINATES.x, TEMP_DOT_COORDINATES.y);
+  }, [transformCoords]);
 
   // Extract Route Nodes
   const routeNodesList = useMemo(() => {
     const rawRoute =
       activeRoute?.nodes ||
-      wayfindingData?.route_to_destination?.nodes ||
-      wayfindingData?.route?.nodes;
+      activeWayfinding?.route_to_destination?.nodes ||
+      activeWayfinding?.route?.nodes;
     return normalizeGraphNodes(rawRoute);
-  }, [activeRoute, wayfindingData]);
+  }, [activeRoute, activeWayfinding]);
 
-  // SVG Active Route Path String (Explicitly via N13 -> N9 on F1)
+  // Extract ALL Real Wayfinding Nodes strictly for the active floor
+  const allGraphNodes = useMemo(() => {
+    const rawNodes =
+      activeWayfinding?.wayfinding_path?.nodes ||
+      activeWayfinding?.nodes ||
+      activeMapMeta?.wayfinding_path?.nodes ||
+      activeMapMeta?.nodes;
+
+    return normalizeGraphNodes(rawNodes);
+  }, [activeWayfinding, activeMapMeta]);
+
+  // N48 Node position lookup for F1
+  const n48NodePos = useMemo(() => {
+    const node = allGraphNodes.find(
+      (n) => n.name && (n.name.toUpperCase() === "N48" || n.name === "48"),
+    );
+    if (node && node.position) return node.position;
+    return { x: 5454.1586, y: 1711.6878 }; // F1 N48 node coordinates from Mist API
+  }, [allGraphNodes]);
+
+  // SVG Active Route Path String
   const routePathD = useMemo(() => {
     const points = [];
 
-    // Path starts at startPos (Live BLE for GR, Lift for F1)
-    if (startPos) {
-      points.push(startPos);
-    }
-
     if (floor === "F1") {
-      // On F1, explicitly route path through N13 -> N9 -> Cabinet
-      const n13 = allGraphNodes.find(
-        (n) => n.name && n.name.toUpperCase() === "N13",
-      );
-      const n9 = allGraphNodes.find(
-        (n) => n.name && n.name.toUpperCase() === "N9",
-      );
+      // F1 Path Sequence: F1 Lift -> N48 -> Temp Dot -> Cabinet
+      if (startPos) points.push(startPos); // 1. F1 Lift
 
-      if (n13 && n13.position) {
-        points.push(transformCoords(n13.position.x, n13.position.y));
+      if (n48NodePos) {
+        points.push(transformCoords(n48NodePos.x, n48NodePos.y)); // 2. Node N48
       }
-      if (n9 && n9.position) {
-        points.push(transformCoords(n9.position.x, n9.position.y));
-      }
-    } else if (routeNodesList && routeNodesList.length > 0) {
-      routeNodesList.forEach((node) => {
-        if (node.position) {
-          const pt = transformCoords(node.position.x, node.position.y);
-          points.push(pt);
-        }
-      });
-    }
 
-    // Path ends at destPos (Lift for GR, Cabinet for F1)
-    if (destPos) {
-      points.push(destPos);
+      if (tempDotPos) points.push(tempDotPos); // 3. Temp Dot
+
+      if (destPos) points.push(destPos); // 4. Cabinet
+    } else {
+      // GR Path Sequence: Live BLE -> Wayfinding Nodes -> GR Lift
+      if (startPos) points.push(startPos);
+
+      if (routeNodesList && routeNodesList.length > 0) {
+        routeNodesList.forEach((node) => {
+          if (node.position) {
+            points.push(transformCoords(node.position.x, node.position.y));
+          }
+        });
+      }
+
+      if (destPos) points.push(destPos);
     }
 
     if (points.length < 2) return "";
@@ -296,10 +328,11 @@ export default function MapView2D({
     }, "");
   }, [
     floor,
-    allGraphNodes,
-    routeNodesList,
     startPos,
+    n48NodePos,
+    tempDotPos,
     destPos,
+    routeNodesList,
     transformCoords,
   ]);
 
@@ -342,7 +375,7 @@ export default function MapView2D({
     });
 
     const globalEdges =
-      wayfindingData?.edges || mapDetails?.wayfinding_path?.edges;
+      activeWayfinding?.edges || activeMapMeta?.wayfinding_path?.edges;
     if (globalEdges && typeof globalEdges === "object") {
       Object.keys(globalEdges).forEach((sourceName) => {
         const targets = globalEdges[sourceName];
@@ -367,7 +400,7 @@ export default function MapView2D({
     }
 
     return lines;
-  }, [allGraphNodes, wayfindingData, mapDetails, transformCoords]);
+  }, [allGraphNodes, activeWayfinding, activeMapMeta, transformCoords]);
 
   // Zoom / Pan Handlers
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.35, 5.0));
@@ -511,7 +544,7 @@ export default function MapView2D({
           />
         ))}
 
-        {/* 4. Graph Wayfinding Nodes (37 Nodes: N1 through N65) */}
+        {/* 4. Graph Wayfinding Nodes (Strictly isolated per active floor) */}
         {allGraphNodes.map((node, idx) => {
           if (!node.position) return null;
           const { svgX, svgY } = transformCoords(
@@ -543,6 +576,13 @@ export default function MapView2D({
             </g>
           );
         })}
+
+        {/* Temp Dot Marker on F1 */}
+        {floor === "F1" && tempDotPos && (
+          <g transform={`translate(${tempDotPos.svgX}, ${tempDotPos.svgY})`}>
+            <circle r="4" fill="#0085ff" stroke="#ffffff" strokeWidth="1.2" />
+          </g>
+        )}
 
         {/* 5. Active Sleek Thin Animated Navigation Route Path */}
         {routePathD && (
@@ -576,42 +616,17 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 6. LIVE BLE LOCATION MARKER (Active on GR floor only; commented capsule label) */}
+        {/* 6. LIVE BLE LOCATION MARKER (Active on GR floor only; commented/hidden on F1 floor) */}
         {floor === "GR" && blePos && (
           <g transform={`translate(${blePos.svgX}, ${blePos.svgY})`}>
             <circle
-              r="8"
+              r="24"
               fill="#0085ff"
               opacity="0.3"
               className="ble-pulse-aura"
             />
-            <circle r="5" fill="#0085ff" stroke="#ffffff" strokeWidth="0.5" />
-            <circle r="2" fill="#ffffff" />
-
-            {/* Commented out capsule label marking as requested:
-            <g transform="translate(0, -26)">
-              <rect
-                x="-50"
-                y="-11"
-                width="100"
-                height="22"
-                rx="11"
-                fill="#0085ff"
-                stroke="#ffffff"
-                strokeWidth="0.5"
-              />
-              <text
-                x="0"
-                y="3"
-                fill="#ffffff"
-                fontSize="10"
-                fontWeight="500"
-                textAnchor="middle"
-              >
-                📍 LIVE LOCATION
-              </text>
-            </g>
-            */}
+            <circle r="13" fill="#0085ff" stroke="#ffffff" strokeWidth="3" />
+            <circle r="5" fill="#ffffff" />
           </g>
         )}
 
@@ -643,31 +658,6 @@ export default function MapView2D({
                 >
                   🛗
                 </text>
-
-                {/* Commented out capsule label marking as requested:
-                <g transform="translate(0, 20)">
-                  <rect
-                    x="-50"
-                    y="-10"
-                    width="100"
-                    height="18"
-                    rx="9"
-                    fill="#9333ea"
-                    stroke="#ffffff"
-                    strokeWidth="1.5"
-                  />
-                  <text
-                    x="0"
-                    y="3"
-                    fill="#ffffff"
-                    fontSize="10"
-                    fontWeight="500"
-                    textAnchor="middle"
-                  >
-                    🛗 FINAL (LIFT)
-                  </text>
-                </g>
-                */}
               </g>
             ) : (
               // F1 Floor: Lift (Start) & Cabinet (Destination)
@@ -699,74 +689,24 @@ export default function MapView2D({
                     >
                       🛗
                     </text>
-
-                    {/* Commented out capsule label marking as requested:
-                    <g transform="translate(0, 20)">
-                      <rect
-                        x="-50"
-                        y="-10"
-                        width="100"
-                        height="18"
-                        rx="9"
-                        fill="#9333ea"
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                      />
-                      <text
-                        x="0"
-                        y="3"
-                        fill="#ffffff"
-                        fontSize="10"
-                        fontWeight="500"
-                        textAnchor="middle"
-                      >
-                        🛗 LIFT (START)
-                      </text>
-                    </g>
-                    */}
                   </g>
                 )}
 
                 {/* Cabinet Destination Marker on F1 */}
                 <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
                   <circle
-                    r="24"
+                    r="8"
                     fill="#ea580c"
                     opacity="0.3"
                     className="ble-pulse-aura"
                   />
                   <circle
-                    r="13"
+                    r="5"
                     fill="#ea580c"
                     stroke="#ffffff"
-                    strokeWidth="3"
+                    strokeWidth="1"
                   />
-                  <circle r="5" fill="#ffffff" />
-
-                  {/* Commented out capsule label marking as requested:
-                  <g transform="translate(0, 32)">
-                    <rect
-                      x="-65"
-                      y="-11"
-                      width="130"
-                      height="22"
-                      rx="11"
-                      fill="#ea580c"
-                      stroke="#ffffff"
-                      strokeWidth="1.5"
-                    />
-                    <text
-                      x="0"
-                      y="3"
-                      fill="#ffffff"
-                      fontSize="10"
-                      fontWeight="500"
-                      textAnchor="middle"
-                    >
-                      🎯 FINAL (CABINET)
-                    </text>
-                  </g>
-                  */}
+                  <circle r="2" fill="#ffffff" />
                 </g>
               </g>
             )}
