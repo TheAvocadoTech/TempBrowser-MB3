@@ -11,9 +11,8 @@ import CommonButton from "./components/CommonButton";
 import {
   getVisitorLocation,
   getNavigationRoute,
-  getMapDetails,
 } from "./services/api";
-import { LIFT_COORDINATES } from "./constants";
+import { LIFT_COORDINATES, CABINET_COORDINATES } from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
@@ -28,36 +27,7 @@ export default function App() {
   const distance = useSelector((state) => state.floor.distance);
   const proximity = useSelector((state) => state.floor.proximity);
 
-  // 1. Initial Load: Fetch map details & 37 wayfinding nodes directly from backend
-  useEffect(() => {
-    const initData = async () => {
-      try {
-        const defaultMapId = "cfa55e13-794f-4081-b1b7-e35f1ea67325";
-        const mapRes = await getMapDetails(defaultMapId);
-        if (mapRes && mapRes.data) {
-          dispatch(
-            updateLiveLocation({
-              map: mapRes.data,
-              wayfinding_path: mapRes.data.wayfinding_path,
-            }),
-          );
-        } else if (mapRes) {
-          dispatch(
-            updateLiveLocation({
-              map: mapRes,
-              wayfinding_path: mapRes.wayfinding_path,
-            }),
-          );
-        }
-      } catch (err) {
-        console.warn("Map details init notice:", err.message);
-      }
-    };
-
-    initData();
-  }, [dispatch]);
-
-  // 2. Fetch real-time BLE location for active visitor
+  // Fetch real-time BLE location and wayfinding data for active visitor
   const fetchRealtimeLocation = useCallback(async () => {
     try {
       const data = await getVisitorLocation("current");
@@ -66,34 +36,40 @@ export default function App() {
         dispatch(updateLiveLocation(data));
 
         const responseData = data.data || data;
-        const bleX = responseData?.location?.x;
-        const bleY = responseData?.location?.y;
+        const bleX = responseData?.location?.x || 5004.59;
+        const bleY = responseData?.location?.y || 2313.4;
         const mapId =
           responseData?.location?.map_id ||
           "cfa55e13-794f-4081-b1b7-e35f1ea67325";
 
-        let finalX, finalY;
+        let fromX, fromY, finalX, finalY;
         if (activeFloor === "GR") {
+          // On GR, route starts from Live BLE location and goes to Lift:
+          fromX = bleX;
+          fromY = bleY;
           finalX = LIFT_COORDINATES.x;
           finalY = LIFT_COORDINATES.y;
         } else {
-          finalX = responseData?.target_coordinates?.x || 5525.3;
-          finalY = responseData?.target_coordinates?.y || 2491.84;
+          // On F1, route starts from Lift and goes to Cabinet:
+          fromX = LIFT_COORDINATES.x;
+          fromY = LIFT_COORDINATES.y;
+          finalX = CABINET_COORDINATES.x;
+          finalY = CABINET_COORDINATES.y;
         }
 
         // Calculate navigation route
         if (
           mapId &&
-          bleX !== undefined &&
-          bleY !== undefined &&
+          fromX !== undefined &&
+          fromY !== undefined &&
           finalX !== undefined &&
           finalY !== undefined
         ) {
           try {
             const routeRes = await getNavigationRoute(
               mapId,
-              bleX,
-              bleY,
+              fromX,
+              fromY,
               finalX,
               finalY,
             );

@@ -6,7 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
-import { LIFT_COORDINATES } from "../constants";
+import { LIFT_COORDINATES, CABINET_COORDINATES } from "../constants";
 
 /**
  * 🎯 2D FLOORPLAN BACKGROUND ALIGNMENT CONFIGURATION (Per Floor)
@@ -24,12 +24,61 @@ export const FLOORPLAN_CALIBRATION = {
     offsetY: 0, // Shift Y in SVG pixels
   },
   F1: {
-    rotation: 270, // Degrees (0, 90, 180, 270)
-    scale: 3.2, // Scale multiplier (1.0 = default fit)
-    offsetX: 550, // Shift X in SVG pixels
-    offsetY: 850, // Shift Y in SVG pixels
+    rotation: 0, // Degrees (0, 90, 180, 270)
+    scale: 0.8, // Scale multiplier (1.0 = default fit)
+    offsetX: 20, // Shift X in SVG pixels
+    offsetY: -10, // Shift Y in SVG pixels
   },
 };
+
+/**
+ * Robust helper to extract and normalize wayfinding nodes from Array or Object structures
+ */
+function normalizeGraphNodes(rawNodes) {
+  if (!rawNodes) return [];
+  let list = [];
+  if (Array.isArray(rawNodes)) {
+    list = rawNodes;
+  } else if (typeof rawNodes === "object") {
+    list = Object.keys(rawNodes).map((key) => {
+      const item = rawNodes[key];
+      return {
+        name: item.name || item.id || key,
+        ...item,
+      };
+    });
+  }
+
+  return list
+    .map((item, idx) => {
+      const name = item.name || item.id || `N${idx + 1}`;
+      let posX, posY;
+      if (
+        item.position &&
+        item.position.x !== undefined &&
+        item.position.y !== undefined
+      ) {
+        posX = Number(item.position.x);
+        posY = Number(item.position.y);
+      } else if (item.x !== undefined && item.y !== undefined) {
+        posX = Number(item.x);
+        posY = Number(item.y);
+      }
+
+      return {
+        name,
+        position:
+          posX !== undefined &&
+          !isNaN(posX) &&
+          posY !== undefined &&
+          !isNaN(posY)
+            ? { x: posX, y: posY }
+            : null,
+        edges: item.edges || item.connections || {},
+      };
+    })
+    .filter((n) => n.position !== null);
+}
 
 export default function MapView2D({
   floor,
@@ -42,9 +91,9 @@ export default function MapView2D({
   distance,
   proximity,
 }) {
-  // Zoomed-in to 1.7x and panned -150px left to hide unused white area and show the right map edge
-  const [zoom, setZoom] = useState(3.2);
-  const [pan, setPan] = useState({ x: -320, y: 0 });
+  // Zoomed-in to 3.2x and panned -320px left to hide unused white area and show the right map edge
+  const [zoom, setZoom] = useState(3.5);
+  const [pan, setPan] = useState({ x: -350, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [renderedPdfImage, setRenderedPdfImage] = useState({
@@ -152,60 +201,88 @@ export default function MapView2D({
     [mapWidth, mapHeight, SVG_WIDTH, SVG_HEIGHT],
   );
 
-  // Live BLE Tag SVG Coordinates
+  // Live BLE Tag SVG Coordinates (Used on GR floor)
   const blePos = useMemo(() => {
     const rawX = bleLocation?.x ?? 5004.59;
     const rawY = bleLocation?.y ?? 2313.4;
     return transformCoords(rawX, rawY);
   }, [bleLocation, transformCoords]);
 
+  // Start Point SVG Coordinates: Live BLE for GR, Lift for F1
+  const startPos = useMemo(() => {
+    if (floor === "F1") {
+      // On F1 floor, path starts from Lift
+      return transformCoords(LIFT_COORDINATES.x, LIFT_COORDINATES.y);
+    } else {
+      // On GR floor, path starts from Live BLE location
+      const rawX = bleLocation?.x ?? 5004.59;
+      const rawY = bleLocation?.y ?? 2313.4;
+      return transformCoords(rawX, rawY);
+    }
+  }, [floor, bleLocation, transformCoords]);
+
   // Target Destination SVG Coordinates according to active floor
   const destPos = useMemo(() => {
     if (floor === "GR") {
       return transformCoords(LIFT_COORDINATES.x, LIFT_COORDINATES.y);
     } else {
-      const rawX = targetCoordinates?.x ?? 5525.3;
-      const rawY = targetCoordinates?.y ?? 2491.84;
-      return transformCoords(rawX, rawY);
+      // Hardcoded Cabinet coordinates for F1:
+      return transformCoords(CABINET_COORDINATES.x, CABINET_COORDINATES.y);
     }
-  }, [floor, targetCoordinates, transformCoords]);
+  }, [floor, transformCoords]);
+
+  // Extract ALL Real Wayfinding Nodes from mapDetails or wayfindingData
+  const allGraphNodes = useMemo(() => {
+    const rawNodes =
+      mapDetails?.wayfinding_path?.nodes ||
+      wayfindingData?.wayfinding_path?.nodes ||
+      wayfindingData?.nodes;
+    return normalizeGraphNodes(rawNodes);
+  }, [mapDetails, wayfindingData]);
 
   // Extract Route Nodes
   const routeNodesList = useMemo(() => {
-    if (
-      activeRoute?.nodes &&
-      Array.isArray(activeRoute.nodes) &&
-      activeRoute.nodes.length > 0
-    ) {
-      return activeRoute.nodes;
-    }
-    if (
-      wayfindingData?.route_to_destination?.nodes &&
-      Array.isArray(wayfindingData.route_to_destination.nodes)
-    ) {
-      return wayfindingData.route_to_destination.nodes;
-    }
-    return [];
+    const rawRoute =
+      activeRoute?.nodes ||
+      wayfindingData?.route_to_destination?.nodes ||
+      wayfindingData?.route?.nodes;
+    return normalizeGraphNodes(rawRoute);
   }, [activeRoute, wayfindingData]);
 
-  // SVG Active Route Path String
+  // SVG Active Route Path String (Explicitly via N13 -> N9 on F1)
   const routePathD = useMemo(() => {
     const points = [];
 
-    if (blePos) {
-      points.push(blePos);
+    // Path starts at startPos (Live BLE for GR, Lift for F1)
+    if (startPos) {
+      points.push(startPos);
     }
 
-    if (routeNodesList && routeNodesList.length > 0) {
+    if (floor === "F1") {
+      // On F1, explicitly route path through N13 -> N9 -> Cabinet
+      const n13 = allGraphNodes.find(
+        (n) => n.name && n.name.toUpperCase() === "N13",
+      );
+      const n9 = allGraphNodes.find(
+        (n) => n.name && n.name.toUpperCase() === "N9",
+      );
+
+      if (n13 && n13.position) {
+        points.push(transformCoords(n13.position.x, n13.position.y));
+      }
+      if (n9 && n9.position) {
+        points.push(transformCoords(n9.position.x, n9.position.y));
+      }
+    } else if (routeNodesList && routeNodesList.length > 0) {
       routeNodesList.forEach((node) => {
-        const pos = node.position || node;
-        if (pos && pos.x !== undefined && pos.y !== undefined) {
-          const pt = transformCoords(pos.x, pos.y);
+        if (node.position) {
+          const pt = transformCoords(node.position.x, node.position.y);
           points.push(pt);
         }
       });
     }
 
+    // Path ends at destPos (Lift for GR, Cabinet for F1)
     if (destPos) {
       points.push(destPos);
     }
@@ -217,33 +294,14 @@ export default function MapView2D({
         ? `M ${pt.svgX} ${pt.svgY}`
         : `${acc} L ${pt.svgX} ${pt.svgY}`;
     }, "");
-  }, [routeNodesList, blePos, destPos, transformCoords]);
-
-  // Extract ALL 37 Real Wayfinding Nodes
-  const allGraphNodes = useMemo(() => {
-    if (
-      mapDetails?.wayfinding_path?.nodes &&
-      Array.isArray(mapDetails.wayfinding_path.nodes) &&
-      mapDetails.wayfinding_path.nodes.length > 0
-    ) {
-      return mapDetails.wayfinding_path.nodes;
-    }
-    if (
-      wayfindingData?.wayfinding_path?.nodes &&
-      Array.isArray(wayfindingData.wayfinding_path.nodes) &&
-      wayfindingData.wayfinding_path.nodes.length > 0
-    ) {
-      return wayfindingData.wayfinding_path.nodes;
-    }
-    if (
-      wayfindingData?.nodes &&
-      Array.isArray(wayfindingData.nodes) &&
-      wayfindingData.nodes.length > 0
-    ) {
-      return wayfindingData.nodes;
-    }
-    return [];
-  }, [mapDetails, wayfindingData]);
+  }, [
+    floor,
+    allGraphNodes,
+    routeNodesList,
+    startPos,
+    destPos,
+    transformCoords,
+  ]);
 
   // Build Edge Lines Array for full graph mesh rendering
   const fullEdgeLines = useMemo(() => {
@@ -283,7 +341,8 @@ export default function MapView2D({
       }
     });
 
-    const globalEdges = wayfindingData?.edges;
+    const globalEdges =
+      wayfindingData?.edges || mapDetails?.wayfinding_path?.edges;
     if (globalEdges && typeof globalEdges === "object") {
       Object.keys(globalEdges).forEach((sourceName) => {
         const targets = globalEdges[sourceName];
@@ -308,14 +367,14 @@ export default function MapView2D({
     }
 
     return lines;
-  }, [allGraphNodes, wayfindingData, transformCoords]);
+  }, [allGraphNodes, wayfindingData, mapDetails, transformCoords]);
 
   // Zoom / Pan Handlers
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.35, 4.0));
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.35, 5.0));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.35, 0.7));
   const handleResetZoom = () => {
-    setZoom(1.7);
-    setPan({ x: -150, y: 0 });
+    setZoom(3.2);
+    setPan({ x: -320, y: 0 });
   };
 
   const handleMouseDown = (e) => {
@@ -332,9 +391,6 @@ export default function MapView2D({
   };
 
   const handleMouseUp = () => setIsDragging(false);
-
-  const displayBleX = bleLocation?.x ?? 5004.59;
-  const displayBleY = bleLocation?.y ?? 2313.4;
 
   return (
     <div
@@ -465,19 +521,19 @@ export default function MapView2D({
           return (
             <g key={node.name || idx}>
               <circle
-                r="5"
+                r="4"
                 cx={svgX}
                 cy={svgY}
                 fill="#334155"
                 stroke="#ffffff"
-                strokeWidth="1.5"
+                strokeWidth="1.2"
               />
               {node.name && (
                 <text
                   x={svgX}
-                  y={svgY + 14}
+                  y={svgY + 12}
                   fill="#1e293b"
-                  fontSize="9"
+                  fontSize="8"
                   fontWeight="800"
                   textAnchor="middle"
                 >
@@ -520,78 +576,80 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 6. LIVE BLE LOCATION MARKER */}
-        {blePos && (
+        {/* 6. LIVE BLE LOCATION MARKER (Active on GR floor only; commented capsule label) */}
+        {floor === "GR" && blePos && (
           <g transform={`translate(${blePos.svgX}, ${blePos.svgY})`}>
             <circle
-              r="24"
+              r="8"
               fill="#0085ff"
               opacity="0.3"
               className="ble-pulse-aura"
             />
-            <circle r="13" fill="#0085ff" stroke="#ffffff" strokeWidth="3" />
-            <circle r="5" fill="#ffffff" />
+            <circle r="5" fill="#0085ff" stroke="#ffffff" strokeWidth="0.5" />
+            <circle r="2" fill="#ffffff" />
 
+            {/* Commented out capsule label marking as requested:
             <g transform="translate(0, -26)">
               <rect
-                x="-75"
-                y="-12"
+                x="-50"
+                y="-11"
                 width="100"
                 height="22"
                 rx="11"
                 fill="#0085ff"
                 stroke="#ffffff"
-                strokeWidth="1.5"
+                strokeWidth="0.5"
               />
               <text
                 x="0"
                 y="3"
                 fill="#ffffff"
                 fontSize="10"
-                fontWeight="900"
+                fontWeight="500"
                 textAnchor="middle"
               >
                 📍 LIVE LOCATION
-                {/* ({Math.round(displayBleX)}, {Math.round(displayBleY)}) */}
               </text>
             </g>
+            */}
           </g>
         )}
 
-        {/* 7. TARGET DESTINATION MARKER */}
+        {/* 7. TARGET & START DESTINATION MARKERS FOR ACTIVE FLOOR */}
         {destPos && (
-          <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
+          <g>
             {floor === "GR" ? (
               // GR Floor: Lift Target
-              <g>
+              <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
                 <circle
-                  r="10"
+                  r="8"
                   fill="#9333ea"
                   opacity="0.25"
                   className="ble-pulse-aura"
                 />
                 <circle
-                  r="7"
+                  r="5"
                   fill="#9333ea"
                   stroke="#ffffff"
-                  strokeWidth="1.8"
+                  strokeWidth="0.5"
                 />
                 <text
                   x="0"
                   y="2.5"
                   fill="#ffffff"
                   fontSize="7.5"
-                  fontWeight="900"
+                  fontWeight="500"
                   textAnchor="middle"
                 >
                   🛗
                 </text>
 
+                {/* Commented out capsule label marking as requested:
                 <g transform="translate(0, 20)">
                   <rect
-                    x="-70"
+                    x="-50"
                     y="-10"
-                    width="140"
+                    width="100"
                     height="18"
                     rx="9"
                     fill="#9333ea"
@@ -603,62 +661,112 @@ export default function MapView2D({
                     y="3"
                     fill="#ffffff"
                     fontSize="10"
-                    fontWeight="900"
+                    fontWeight="500"
                     textAnchor="middle"
                   >
                     🛗 FINAL (LIFT)
-                    {/* ({Math.round(LIFT_COORDINATES.x)},{" "}
-                    {Math.round(LIFT_COORDINATES.y)}) */}
                   </text>
                 </g>
+                */}
               </g>
             ) : (
-              // F1 Floor: Cabinet Target
+              // F1 Floor: Lift (Start) & Cabinet (Destination)
               <g>
-                <circle
-                  r="24"
-                  fill="#ea580c"
-                  opacity="0.3"
-                  className="ble-pulse-aura"
-                />
-                <circle
-                  r="13"
-                  fill="#ea580c"
-                  stroke="#ffffff"
-                  strokeWidth="3"
-                />
-                <circle r="5" fill="#ffffff" />
+                {/* Lift Start Marker on F1 */}
+                {startPos && (
+                  <g
+                    transform={`translate(${startPos.svgX}, ${startPos.svgY})`}
+                  >
+                    <circle
+                      r="8"
+                      fill="#9333ea"
+                      opacity="0.25"
+                      className="ble-pulse-aura"
+                    />
+                    <circle
+                      r="5"
+                      fill="#9333ea"
+                      stroke="#ffffff"
+                      strokeWidth="0.5"
+                    />
+                    <text
+                      x="0"
+                      y="2.5"
+                      fill="#ffffff"
+                      fontSize="7.5"
+                      fontWeight="500"
+                      textAnchor="middle"
+                    >
+                      🛗
+                    </text>
 
-                <g transform="translate(0, 32)">
-                  <rect
-                    x="-95"
-                    y="-12"
-                    width="190"
-                    height="22"
-                    rx="11"
+                    {/* Commented out capsule label marking as requested:
+                    <g transform="translate(0, 20)">
+                      <rect
+                        x="-50"
+                        y="-10"
+                        width="100"
+                        height="18"
+                        rx="9"
+                        fill="#9333ea"
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x="0"
+                        y="3"
+                        fill="#ffffff"
+                        fontSize="10"
+                        fontWeight="500"
+                        textAnchor="middle"
+                      >
+                        🛗 LIFT (START)
+                      </text>
+                    </g>
+                    */}
+                  </g>
+                )}
+
+                {/* Cabinet Destination Marker on F1 */}
+                <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
+                  <circle
+                    r="24"
+                    fill="#ea580c"
+                    opacity="0.3"
+                    className="ble-pulse-aura"
+                  />
+                  <circle
+                    r="13"
                     fill="#ea580c"
                     stroke="#ffffff"
-                    strokeWidth="1.5"
+                    strokeWidth="3"
                   />
-                  <text
-                    x="0"
-                    y="3"
-                    fill="#ffffff"
-                    fontSize="10"
-                    fontWeight="900"
-                    textAnchor="middle"
-                  >
-                    🎯 FINAL (CABINET)
-                    {/* : (
-                    {targetCoordinates?.x
-                      ? Math.round(targetCoordinates.x)
-                      : "5525"}
-                    ,{" "}
-                    {targetCoordinates?.y
-                      ? Math.round(targetCoordinates.y)
-                      : "2492"}
-                    ) */}
-                  </text>
+                  <circle r="5" fill="#ffffff" />
+
+                  {/* Commented out capsule label marking as requested:
+                  <g transform="translate(0, 32)">
+                    <rect
+                      x="-65"
+                      y="-11"
+                      width="130"
+                      height="22"
+                      rx="11"
+                      fill="#ea580c"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x="0"
+                      y="3"
+                      fill="#ffffff"
+                      fontSize="10"
+                      fontWeight="500"
+                      textAnchor="middle"
+                    >
+                      🎯 FINAL (CABINET)
+                    </text>
+                  </g>
+                  */}
                 </g>
               </g>
             )}

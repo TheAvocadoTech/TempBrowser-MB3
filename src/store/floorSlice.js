@@ -1,5 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { LIFT_COORDINATES } from "../constants";
+import { LIFT_COORDINATES, CABINET_COORDINATES } from "../constants";
 
 const initialState = {
   activeFloor: "GR", // 'GR' or 'F1'
@@ -14,7 +14,7 @@ const initialState = {
   assets: [],
 };
 
-const floorSlice = createSlice({
+export const floorSlice = createSlice({
   name: "floor",
   initialState,
   reducers: {
@@ -26,8 +26,8 @@ const floorSlice = createSlice({
       // Update target position based on floor selection
       if (newFloor === "GR") {
         state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
-      } else if (state.targetPos?.x !== undefined) {
-        // Retain F1 target coordinates
+      } else if (newFloor === "F1") {
+        state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
       }
     },
 
@@ -61,26 +61,23 @@ const floorSlice = createSlice({
         }
       }
 
-      // Update F1 target coordinates from backend API
-      if (responseData.target_coordinates) {
-        if (state.activeFloor === "F1") {
-          state.targetPos = responseData.target_coordinates;
-        }
-      }
-
-      // Force GR target coordinates to Lift
-      if (state.activeFloor === "GR") {
+      // Target coordinates for F1 (Cabinet) and GR (Lift)
+      if (state.activeFloor === "F1") {
+        state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
+      } else if (state.activeFloor === "GR") {
         state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
       }
 
-      // Distance & Proximity
-      //---------------
+      // Distance calculation: from Live BLE on GR, from Lift on F1
+      const startX = state.activeFloor === "F1" ? LIFT_COORDINATES.x : state.visitorPos?.x;
+      const startY = state.activeFloor === "F1" ? LIFT_COORDINATES.y : state.visitorPos?.y;
+
       if (
-        state.visitorPos?.x !== undefined &&
+        startX !== undefined &&
         state.targetPos?.x !== undefined
       ) {
-        const dx = state.targetPos.x - state.visitorPos.x;
-        const dy = state.targetPos.y - state.visitorPos.y;
+        const dx = state.targetPos.x - startX;
+        const dy = state.targetPos.y - startY;
         state.distance = Math.sqrt(dx * dx + dy * dy);
       } else if (responseData.distance !== undefined) {
         state.distance = responseData.distance;
