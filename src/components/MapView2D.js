@@ -620,13 +620,13 @@ export default function MapView2D({
         {floor === "GR" && blePos && (
           <g transform={`translate(${blePos.svgX}, ${blePos.svgY})`}>
             <circle
-              r="24"
+              r="6"
               fill="#0085ff"
               opacity="0.3"
               className="ble-pulse-aura"
             />
-            <circle r="13" fill="#0085ff" stroke="#ffffff" strokeWidth="3" />
-            <circle r="5" fill="#ffffff" />
+            <circle r="4" fill="#0085ff" stroke="#ffffff" strokeWidth="0.5" />
+            <circle r="1" fill="#ffffff" />
           </g>
         )}
 
