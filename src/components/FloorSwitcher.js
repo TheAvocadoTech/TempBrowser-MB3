@@ -1,5 +1,5 @@
 import React from 'react';
-
+//
 const FloorSwitcher = ({ activeFloor, onFloorChange }) => {
   return (
     <div className="floor-toolbar">
