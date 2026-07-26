@@ -88,6 +88,12 @@ export default function App() {
         const bleX = responseData?.location?.x || 5004.59;
         const bleY = responseData?.location?.y || 2313.4;
 
+        // Print Live BLE Location Coordinates to Console
+        console.log(
+          `📍 LIVE BLE LOCATION: X = ${bleX}, Y = ${bleY}`,
+          responseData?.location,
+        );
+
         let mapId, fromX, fromY, finalX, finalY;
         if (activeFloor === "GR") {
           // On GR, route starts from Live BLE location and goes to GR Lift:
@@ -97,10 +103,10 @@ export default function App() {
           finalX = LIFT_COORDINATES.x;
           finalY = LIFT_COORDINATES.y;
         } else {
-          // On F1, route starts from F1 Lift constant and goes to Cabinet:
+          // On F1, route starts from Live BLE location and goes to Cabinet:
           mapId = FLOOR_MAP_IDS.F1;
-          fromX = F1_LIFT_COORDINATES.x;
-          fromY = F1_LIFT_COORDINATES.y;
+          fromX = bleX;
+          fromY = bleY;
           finalX = CABINET_COORDINATES.x;
           finalY = CABINET_COORDINATES.y;
         }

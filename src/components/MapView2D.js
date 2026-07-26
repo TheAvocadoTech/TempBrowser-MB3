@@ -38,6 +38,59 @@ export const FLOORPLAN_CALIBRATION = {
 };
 
 /**
+ * Extract waypoints from backend route structures (nodes, waypoints, path arrays/objects)
+ */
+function extractWaypoints(rawRoute) {
+  if (!rawRoute) return [];
+
+  let list = [];
+  if (Array.isArray(rawRoute)) {
+    list = rawRoute;
+  } else if (rawRoute.nodes && Array.isArray(rawRoute.nodes)) {
+    list = rawRoute.nodes;
+  } else if (rawRoute.waypoints && Array.isArray(rawRoute.waypoints)) {
+    list = rawRoute.waypoints;
+  } else if (rawRoute.path && Array.isArray(rawRoute.path)) {
+    list = rawRoute.path;
+  } else if (typeof rawRoute === "object") {
+    if (rawRoute.nodes) list = Object.values(rawRoute.nodes);
+    else if (rawRoute.waypoints) list = Object.values(rawRoute.waypoints);
+    else list = Object.values(rawRoute);
+  }
+
+  return list
+    .map((item) => {
+      if (!item) return null;
+      let posX, posY;
+      if (Array.isArray(item) && item.length >= 2) {
+        posX = Number(item[0]);
+        posY = Number(item[1]);
+      } else if (
+        item.position &&
+        item.position.x !== undefined &&
+        item.position.y !== undefined
+      ) {
+        posX = Number(item.position.x);
+        posY = Number(item.position.y);
+      } else if (item.x !== undefined && item.y !== undefined) {
+        posX = Number(item.x);
+        posY = Number(item.y);
+      }
+
+      if (
+        posX !== undefined &&
+        !isNaN(posX) &&
+        posY !== undefined &&
+        !isNaN(posY)
+      ) {
+        return { x: posX, y: posY };
+      }
+      return null;
+    })
+    .filter((pt) => pt !== null);
+}
+
+/**
  * Robust helper to extract and normalize wayfinding nodes from Array or Object structures
  */
 function normalizeGraphNodes(rawNodes) {
@@ -127,6 +180,16 @@ export default function MapView2D({
 
   // Calibration settings for current floor (GR or F1)
   const calib = FLOORPLAN_CALIBRATION[floor] || FLOORPLAN_CALIBRATION.GR;
+
+  // Log Live BLE Coordinates on update
+  useEffect(() => {
+    if (bleLocation?.x !== undefined && bleLocation?.y !== undefined) {
+      console.log(
+        `📍 [MapView2D] Live BLE Location Coordinates: X = ${bleLocation.x}, Y = ${bleLocation.y}`,
+        bleLocation,
+      );
+    }
+  }, [bleLocation]);
 
   // Dynamically load PDF.js engine and auto-render /floorplans/GR.pdf or /floorplans/F1.pdf
   useEffect(() => {
@@ -226,7 +289,7 @@ export default function MapView2D({
     [mapWidth, mapHeight, SVG_WIDTH, SVG_HEIGHT],
   );
 
-  // Live BLE Tag SVG Coordinates (Used on GR floor)
+  // Live BLE Tag SVG Coordinates
   const blePos = useMemo(() => {
     const rawX = bleLocation?.x ?? 5004.59;
     const rawY = bleLocation?.y ?? 2313.4;
@@ -261,13 +324,18 @@ export default function MapView2D({
     return transformCoords(TEMP_DOT_COORDINATES.x, TEMP_DOT_COORDINATES.y);
   }, [transformCoords]);
 
-  // Extract Route Nodes
-  const routeNodesList = useMemo(() => {
-    const rawRoute =
+  // Extract Backend Waypoints array for Live Route
+  const backendWaypoints = useMemo(() => {
+    const rawWaypoints =
+      activeRoute?.waypoints ||
       activeRoute?.nodes ||
+      activeRoute?.path ||
+      activeWayfinding?.route_to_destination?.waypoints ||
       activeWayfinding?.route_to_destination?.nodes ||
+      activeWayfinding?.route?.waypoints ||
       activeWayfinding?.route?.nodes;
-    return normalizeGraphNodes(rawRoute);
+
+    return extractWaypoints(rawWaypoints);
   }, [activeRoute, activeWayfinding]);
 
   // Extract ALL Real Wayfinding Nodes strictly for the active floor
@@ -290,12 +358,12 @@ export default function MapView2D({
     return { x: 5454.1586, y: 1711.6878 }; // F1 N48 node coordinates from Mist API
   }, [allGraphNodes]);
 
-  // SVG Active Route Path String
+  // Static/Reference Path String (Lift -> N48 -> Temp Dot -> Cabinet on F1; Live BLE -> Waypoints -> Lift on GR)
   const routePathD = useMemo(() => {
     const points = [];
 
     if (floor === "F1") {
-      // F1 Path Sequence: F1 Lift -> N48 -> Temp Dot -> Cabinet
+      // F1 Reference Path Sequence: F1 Lift -> N48 -> Temp Dot -> Cabinet
       if (startPos) points.push(startPos); // 1. F1 Lift
 
       if (n48NodePos) {
@@ -306,14 +374,12 @@ export default function MapView2D({
 
       if (destPos) points.push(destPos); // 4. Cabinet
     } else {
-      // GR Path Sequence: Live BLE -> Wayfinding Nodes -> GR Lift
+      // GR Path Sequence: Live BLE -> Backend Waypoints -> GR Lift
       if (startPos) points.push(startPos);
 
-      if (routeNodesList && routeNodesList.length > 0) {
-        routeNodesList.forEach((node) => {
-          if (node.position) {
-            points.push(transformCoords(node.position.x, node.position.y));
-          }
+      if (backendWaypoints && backendWaypoints.length > 0) {
+        backendWaypoints.forEach((pt) => {
+          points.push(transformCoords(pt.x, pt.y));
         });
       }
 
@@ -333,9 +399,37 @@ export default function MapView2D({
     n48NodePos,
     tempDotPos,
     destPos,
-    routeNodesList,
+    backendWaypoints,
     transformCoords,
   ]);
+
+  // F1 Live Animated Blue Path (Live BLE Location -> Backend Waypoints -> Cabinet Target)
+  const f1LiveRoutePathD = useMemo(() => {
+    if (floor !== "F1") return "";
+
+    const points = [];
+
+    // 1. Live BLE Start Point
+    if (blePos) points.push(blePos);
+
+    // 2. Exact Backend Waypoints from API
+    if (backendWaypoints && backendWaypoints.length > 0) {
+      backendWaypoints.forEach((pt) => {
+        points.push(transformCoords(pt.x, pt.y));
+      });
+    }
+
+    // 3. Cabinet Target Destination
+    if (destPos) points.push(destPos);
+
+    if (points.length < 2) return "";
+
+    return points.reduce((acc, pt, idx) => {
+      return idx === 0
+        ? `M ${pt.svgX} ${pt.svgY}`
+        : `${acc} L ${pt.svgX} ${pt.svgY}`;
+    }, "");
+  }, [floor, blePos, backendWaypoints, destPos, transformCoords]);
 
   // SVG Proposed Ground Floor Route Path String (Light Blue)
   // Sequence: Proposed Start Point (right of N9) -> N9 -> N13 -> Lift
@@ -684,11 +778,70 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 5. Active Sleek Thin Animated Navigation Route Path */}
+        {/* 5. Static / Hardcoded Map Reference Path */}
         {routePathD && (
           <g>
+            {floor === "F1" ? (
+              // F1 Static Path Style: Black Dotted Hardcoded Map Style
+              <g>
+                <path
+                  d={routePathD}
+                  fill="none"
+                  stroke="rgba(6, 40, 53, 0.25)"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={routePathD}
+                  fill="none"
+                  stroke="#062835"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeDasharray="6 6"
+                  markerEnd="url(#proposedRouteArrow)"
+                />
+              </g>
+            ) : (
+              // GR Active Navigation Route Style: Animated Blue Path
+              <g>
+                <path
+                  d={routePathD}
+                  fill="none"
+                  stroke="rgba(0, 133, 255, 0.2)"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={routePathD}
+                  fill="none"
+                  stroke="#0085ff"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  markerEnd="url(#routeArrow)"
+                />
+                <path
+                  d={routePathD}
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeDasharray="4 4"
+                  className="path-animated"
+                />
+              </g>
+            )}
+          </g>
+        )}
+
+        {/* 6. Live Animated Blue Path on F1 (Live BLE Location -> Backend Waypoints -> Cabinet) */}
+        {floor === "F1" && f1LiveRoutePathD && (
+          <g>
             <path
-              d={routePathD}
+              d={f1LiveRoutePathD}
               fill="none"
               stroke="rgba(0, 133, 255, 0.2)"
               strokeWidth="6"
@@ -696,7 +849,7 @@ export default function MapView2D({
               strokeLinejoin="round"
             />
             <path
-              d={routePathD}
+              d={f1LiveRoutePathD}
               fill="none"
               stroke="#0085ff"
               strokeWidth="3"
@@ -705,7 +858,7 @@ export default function MapView2D({
               markerEnd="url(#routeArrow)"
             />
             <path
-              d={routePathD}
+              d={f1LiveRoutePathD}
               fill="none"
               stroke="#ffffff"
               strokeWidth="1.2"
@@ -716,8 +869,8 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 6. LIVE BLE LOCATION MARKER (Active on GR floor only; commented/hidden on F1 floor) */}
-        {floor === "GR" && blePos && (
+        {/* 7. LIVE BLE LOCATION MARKER (Active on both GR & F1 floors) */}
+        {blePos && (
           <g transform={`translate(${blePos.svgX}, ${blePos.svgY})`}>
             <circle
               r="6"
@@ -730,7 +883,7 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* 7. TARGET & START DESTINATION MARKERS FOR ACTIVE FLOOR */}
+        {/* 8. TARGET & START DESTINATION MARKERS FOR ACTIVE FLOOR */}
         {destPos && (
           <g>
             {floor === "GR" ? (
