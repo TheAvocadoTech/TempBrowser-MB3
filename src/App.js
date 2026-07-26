@@ -127,8 +127,12 @@ export default function App() {
               finalX,
               finalY,
             );
-            if (routeRes && routeRes.route) {
-              dispatch(setActiveRoute(routeRes.route));
+            const routePayload =
+              routeRes?.data?.route || routeRes?.route || routeRes?.data;
+
+            if (routePayload) {
+              console.log("🗺️ RECEIVED ROUTE FROM BACKEND:", routePayload);
+              dispatch(setActiveRoute(routePayload));
             }
           } catch (routeErr) {
             console.warn("Route API notice:", routeErr.message);
