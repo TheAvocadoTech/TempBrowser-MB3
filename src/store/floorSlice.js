@@ -80,8 +80,20 @@ export const floorSlice = createSlice({
       }
 
       if (responseData.location) {
-        state.visitorPos = responseData.location;
+        const incoming = responseData.location;
+        const prev = state.visitorPos;
 
+        // Only update position if coordinates actually changed (prevents new object reference
+        // when backend returns the same x/y, which would cause marker jitter on the map)
+        const xChanged = !prev || Math.abs((prev.x ?? 0) - (incoming.x ?? 0)) > 0.01;
+        const yChanged = !prev || Math.abs((prev.y ?? 0) - (incoming.y ?? 0)) > 0.01;
+
+        if (xChanged || yChanged) {
+          state.visitorPos = incoming;
+        } else {
+          // Coordinates unchanged — only refresh non-position metadata
+          state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
+        }
         // --- BLE Signal Quality Gate ---
         // Only accept readings where rssi > -65 (strong signal, absolute value < 65 dBm).
         // Beam index has no restriction — any beam is accepted.

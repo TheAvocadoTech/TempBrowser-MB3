@@ -139,6 +139,11 @@ function normalizeGraphNodes(rawNodes) {
     .filter((n) => n.position !== null);
 }
 
+// Module-level constants — declared outside component so they never change
+// reference between renders (prevents transformCoords useCallback invalidation)
+const SVG_WIDTH = 900;
+const SVG_HEIGHT = 600;
+
 export default function MapView2D({
   floor,
   onFloorChange,
@@ -160,11 +165,10 @@ export default function MapView2D({
     GR: null,
     F1: null,
   });
+  // Ref mirror of renderedPdfImage — used in the PDF useEffect dependency array
+  // to avoid re-running the effect on every state update (prevents cascading renders)
+  const renderedPdfImageRef = useRef({ GR: null, F1: null });
   const containerRef = useRef(null);
-
-  // SVG Viewport canvas size
-  const SVG_WIDTH = 900;
-  const SVG_HEIGHT = 600;
 
   // Active Floor Map Details & Wayfinding Data
   const activeFloorData = floorMapData?.[floor] || {};
@@ -211,8 +215,9 @@ export default function MapView2D({
         });
       }
 
-      // 2. Auto-fetch and render PDF from /floorplans/GR.pdf or /floorplans/F1.pdf
-      if (window.pdfjsLib && !renderedPdfImage[floor]) {
+      // 2. Auto-fetch and render PDF — use ref to check already-rendered floors
+      // (avoids including renderedPdfImage state in deps which causes re-runs on every poll)
+      if (window.pdfjsLib && !renderedPdfImageRef.current[floor]) {
         const pdfPath = `/floorplans/${floor}.pdf`;
         try {
           console.log(`📄 Auto-rendering floorplan PDF: ${pdfPath}`);
@@ -229,6 +234,7 @@ export default function MapView2D({
           await page.render({ canvasContext: context, viewport }).promise;
           const pngDataUrl = canvas.toDataURL("image/png");
 
+          renderedPdfImageRef.current[floor] = pngDataUrl;
           setRenderedPdfImage((prev) => ({ ...prev, [floor]: pngDataUrl }));
           console.log(
             `✅ Rendered ${floor}.pdf into high-res background image!`,
@@ -243,7 +249,7 @@ export default function MapView2D({
     };
 
     loadPdfEngineAndRender();
-  }, [floor, renderedPdfImage]);
+  }, [floor]); // ✅ Only re-run when floor changes, not on every poll-triggered render
 
   // Floorplan image URL priority: Rendered PDF Data URL -> Mist API URL -> Local PNG fallback
   const floorplanImageUrl = useMemo(() => {
@@ -286,7 +292,7 @@ export default function MapView2D({
 
       return { svgX, svgY };
     },
-    [mapWidth, mapHeight, SVG_WIDTH, SVG_HEIGHT],
+    [mapWidth, mapHeight], // SVG_WIDTH/SVG_HEIGHT are now module-level constants — stable, no need in deps
   );
 
   // Live BLE Tag SVG Coordinates
@@ -968,35 +974,22 @@ export default function MapView2D({
       </svg>
 
       {/* Floating Zoom Controls */}
-      <div
-        style={{
-          position: "absolute",
-          top: 16,
-          right: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          zIndex: 20,
-        }}
-      >
+      <div className="map-zoom-controls">
         <button
           onClick={handleZoomIn}
-          className="floor-btn-stack inactive"
-          style={{ width: 38, height: 38, borderRadius: 12 }}
+          className="floor-btn-stack inactive map-zoom-btn"
         >
           <ZoomIn size={16} />
         </button>
         <button
           onClick={handleZoomOut}
-          className="floor-btn-stack inactive"
-          style={{ width: 38, height: 38, borderRadius: 12 }}
+          className="floor-btn-stack inactive map-zoom-btn"
         >
           <ZoomOut size={16} />
         </button>
         <button
           onClick={handleResetZoom}
-          className="floor-btn-stack inactive"
-          style={{ width: 38, height: 38, borderRadius: 12 }}
+          className="floor-btn-stack inactive map-zoom-btn"
         >
           <Maximize2 size={14} />
         </button>
