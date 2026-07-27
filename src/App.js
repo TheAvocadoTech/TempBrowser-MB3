@@ -5,10 +5,13 @@ import {
   setFloorMapDetails,
   updateLiveLocation,
   setActiveRoute,
+  selectBleSignal,
 } from "./store/floorSlice";
 import Header from "./components/Header";
 import MapView2D from "./components/MapView2D";
-import CommonButton from "./components/CommonButton";
+import BleSignalDiagnostics from "./components/BleSignalDiagnostics";
+// CommonButton is currently unused — kept for future use
+// import CommonButton from "./components/CommonButton";
 import {
   getVisitorLocation,
   getNavigationRoute,
@@ -34,6 +37,8 @@ export default function App() {
   const activeRoute = useSelector((state) => state.floor.activeRoute);
   const distance = useSelector((state) => state.floor.distance);
   const proximity = useSelector((state) => state.floor.proximity);
+  // BLE signal diagnostics (rssi, beam, ap_mac, last_seen)
+  const bleSignal = useSelector(selectBleSignal);
 
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
@@ -93,6 +98,21 @@ export default function App() {
           `📍 LIVE BLE LOCATION: X = ${bleX}, Y = ${bleY}`,
           responseData?.location,
         );
+
+        // 📡 Beam & Signal Diagnostics — log all beam-related fields from backend
+        const loc = responseData?.location;
+        console.log("📡 BEAM DIAGNOSTICS", {
+          rssi:        loc?.rssi        ?? "N/A",   // Signal strength in dBm
+          beam:        loc?.beam        ?? "N/A",   // Antenna beam index (Juniper Mist)
+          ap_mac:      loc?.ap_mac      ?? "N/A",   // MAC of the AP that detected the tag
+          last_seen:   loc?.last_seen   ?? "N/A",   // Unix timestamp of last BLE frame
+          mac:         loc?.mac         ?? "N/A",   // BLE tag MAC address
+          name:        loc?.name        ?? "N/A",   // Tag display name
+          map_id:      loc?.map_id      ?? "N/A",   // Floor map ID
+          device_name: loc?.device_name ?? "N/A",   // Tag device name
+          manufacture: loc?.manufacture ?? "N/A",   // Tag manufacturer
+        });
+
 
         let mapId, fromX, fromY, finalX, finalY;
         if (activeFloor === "GR") {
@@ -187,8 +207,16 @@ export default function App() {
           />
         </main>
 
+        {/* BLE Signal Diagnostics — shown inside the map card area */}
+        <BleSignalDiagnostics
+          rssi={bleSignal?.rssi}
+          beam={bleSignal?.beam}
+          ap_mac={bleSignal?.ap_mac}
+          last_seen={bleSignal?.last_seen}
+        />
+
         {/* Bottom Navigation Section */}
-        <CommonButton onClick={handleCommonButtonClick} />
+        {/* <CommonButton onClick={handleCommonButtonClick} /> */}
       </div>
     </div>
   );

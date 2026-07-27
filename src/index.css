@@ -342,3 +342,150 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ============================================================
+   BLE Signal Diagnostics Card
+   ============================================================ */
+.ble-diag-card {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  width: 200px;          /* Fixed narrow width — leaves room for floor switcher on right */
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-radius: 20px;
+  padding: 12px 14px 10px 14px;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  transition: border-color 0.3s;
+}
+
+
+.ble-diag-card--weak {
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: 0 8px 24px -4px rgba(239, 68, 68, 0.15);
+}
+
+/* Header */
+.ble-diag-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ble-diag-title-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ble-diag-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: 0.3px;
+}
+
+/* Animated pulse dots */
+.ble-diag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  animation: ble-diag-pulse 1.6s ease-in-out infinite;
+}
+
+.ble-diag-dot--green  { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.ble-diag-dot--yellow { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+.ble-diag-dot--red    { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.ble-diag-dot--grey   { background: #94a3b8; box-shadow: none; animation: none; }
+
+@keyframes ble-diag-pulse {
+  0%   { transform: scale(0.9); opacity: 0.7; }
+  50%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+/* Quality pill badge */
+.ble-diag-quality-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+}
+
+.ble-diag-quality-pill--green  { background: #dcfce7; color: #16a34a; }
+.ble-diag-quality-pill--yellow { background: #fef9c3; color: #b45309; }
+.ble-diag-quality-pill--red    { background: #fee2e2; color: #dc2626; }
+.ble-diag-quality-pill--grey   { background: #f1f5f9; color: #64748b; }
+
+/* Metrics grid — 2 columns */
+.ble-diag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.ble-diag-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ble-diag-metric-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.ble-diag-metric-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* RSSI colour by quality */
+.ble-diag-metric-value--green  { color: #16a34a; }
+.ble-diag-metric-value--yellow { color: #b45309; }
+.ble-diag-metric-value--red    { color: #dc2626; }
+.ble-diag-metric-value--grey   { color: #94a3b8; }
+
+/* Monospace for MAC address */
+.ble-diag-metric-value--mono {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+/* Weak-signal warning banner */
+.ble-diag-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 9px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.ble-diag-warning-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.ble-diag-warning-text {
+  font-size: 10px;
+  font-weight: 500;
+  color: #92400e;
+  line-height: 1.4;
+}
+

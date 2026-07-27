@@ -21,6 +21,13 @@ const initialState = {
   distance: null,
   proximity: "Tracking Active",
   assets: [],
+  // BLE signal diagnostics: rssi, beam, ap_mac from Juniper Mist
+  bleSignal: {
+    rssi: null,   // e.g. -72 (dBm)
+    beam: null,   // e.g. 3 (antenna beam index)
+    ap_mac: null, // e.g. "c878678a984c"
+    last_seen: null,
+  },
 };
 
 export const floorSlice = createSlice({
@@ -74,7 +81,33 @@ export const floorSlice = createSlice({
 
       if (responseData.location) {
         state.visitorPos = responseData.location;
+
+        // --- BLE Signal Quality Gate ---
+        // Only accept readings where:
+        //   beam < 3  → directional beam is narrow/precise
+        //   rssi > -65 → signal is strong (absolute value < 65 dBm)
+        // If the incoming data fails either check, keep the last good bleSignal as fallback.
+        const incomingRssi = responseData.location.rssi ?? null;
+        const incomingBeam = responseData.location.beam ?? null;
+
+        const isGoodReading =
+          incomingRssi !== null &&
+          incomingBeam !== null &&
+          incomingBeam < 3 &&
+          incomingRssi > -65;
+
+        if (isGoodReading) {
+          // ✅ Passes quality gate — update with fresh values
+          state.bleSignal = {
+            rssi: incomingRssi,
+            beam: incomingBeam,
+            ap_mac: responseData.location.ap_mac ?? null,
+            last_seen: responseData.location.last_seen ?? null,
+          };
+        }
+        // ❌ Outside limits — bleSignal stays at last accepted value (fallback)
       }
+
 
       // Update mapMeta & wayfindingData for GR floor only
       if (responseData.map) {
@@ -141,4 +174,7 @@ export const {
   setActiveRoute,
   setAssets,
 } = floorSlice.actions;
+
+// Selector: BLE signal diagnostics
+export const selectBleSignal = (state) => state.floor.bleSignal;
 export default floorSlice.reducer;
