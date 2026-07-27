@@ -83,17 +83,14 @@ export const floorSlice = createSlice({
         state.visitorPos = responseData.location;
 
         // --- BLE Signal Quality Gate ---
-        // Only accept readings where:
-        //   beam < 3  → directional beam is narrow/precise
-        //   rssi > -65 → signal is strong (absolute value < 65 dBm)
-        // If the incoming data fails either check, keep the last good bleSignal as fallback.
+        // Only accept readings where rssi > -65 (strong signal, absolute value < 65 dBm).
+        // Beam index has no restriction — any beam is accepted.
+        // If rssi fails the check, keep the last good bleSignal as fallback.
         const incomingRssi = responseData.location.rssi ?? null;
         const incomingBeam = responseData.location.beam ?? null;
 
         const isGoodReading =
           incomingRssi !== null &&
-          incomingBeam !== null &&
-          incomingBeam < 3 &&
           incomingRssi > -65;
 
         if (isGoodReading) {
@@ -105,7 +102,7 @@ export const floorSlice = createSlice({
             last_seen: responseData.location.last_seen ?? null,
           };
         }
-        // ❌ Outside limits — bleSignal stays at last accepted value (fallback)
+        // ❌ rssi outside limit — bleSignal stays at last accepted value (fallback)
       }
 
 
