@@ -175,8 +175,8 @@ export default function MapView2D({
   const mapWidth = activeMapMeta?.width || 6400;
   const mapHeight = activeMapMeta?.height || 5120;
 
-  // Pixels Per Meter (PPM) resolution from Mist API map metadata per floor
-  const ppm = activeMapMeta?.ppm || (floor === "GR" ? 50.07 : 57.28);
+  // Pixels Per Meter (PPM) resolution hardcoded to 57.28 for consistent scale
+  const ppm = 57.28;
 
   // Calibration settings for current floor (GR or F1)
   const calib = FLOORPLAN_CALIBRATION[floor] || FLOORPLAN_CALIBRATION.GR;
@@ -253,7 +253,7 @@ export default function MapView2D({
     return floor === "GR" ? "/floorplans/GR.png" : "/floorplans/F1.png";
   }, [renderedPdfImage, floor, activeMapMeta]);
 
-  // Calculate distance in meters
+  // Calculate distance in meters using hardcoded PPM 57.28
   const distanceInMeters = useMemo(() => {
     if (typeof distance !== "number" || isNaN(distance) || distance <= 0)
       return null;
