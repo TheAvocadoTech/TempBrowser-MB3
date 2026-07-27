@@ -20,8 +20,8 @@ import React from "react";
 // Classify RSSI into quality tiers
 function getSignalQuality(rssi) {
   if (rssi === null || rssi === undefined) return { label: "No Data", color: "grey", emoji: "⚪" };
-  if (rssi >= -65) return { label: "Excellent", color: "green", emoji: "🟢" };
-  if (rssi >= -70) return { label: "Good", color: "green", emoji: "🟢" };
+  if (rssi >= -55) return { label: "Excellent", color: "green", emoji: "🟢" };
+  if (rssi >= -65) return { label: "Good", color: "green", emoji: "🟢" };
   if (rssi >= -75) return { label: "Fair", color: "yellow", emoji: "🟡" };
   return { label: "Poor", color: "red", emoji: "🔴" };
 }

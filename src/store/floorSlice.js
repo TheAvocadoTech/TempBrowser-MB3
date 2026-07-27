@@ -21,6 +21,9 @@ const initialState = {
   distance: null,
   proximity: "Tracking Active",
   assets: [],
+  // AP MAC signal tracking & active anchor
+  apCache: {}, // { [ap_mac]: { rssi, x, y, last_seen } }
+  activeApMac: null,
   // BLE signal diagnostics: rssi, beam, ap_mac from Juniper Mist
   bleSignal: {
     rssi: null,   // e.g. -72 (dBm)
@@ -83,38 +86,94 @@ export const floorSlice = createSlice({
         const incoming = responseData.location;
         const prev = state.visitorPos;
 
-        // Only update position if coordinates actually changed (prevents new object reference
-        // when backend returns the same x/y, which would cause marker jitter on the map)
-        const xChanged = !prev || Math.abs((prev.x ?? 0) - (incoming.x ?? 0)) > 0.01;
-        const yChanged = !prev || Math.abs((prev.y ?? 0) - (incoming.y ?? 0)) > 0.01;
+        const incomingRssi = incoming.rssi ?? null;
+        const incomingBeam = incoming.beam ?? null;
+        const incomingApMac = incoming.ap_mac ?? null;
 
-        if (xChanged || yChanged) {
-          state.visitorPos = incoming;
-        } else {
-          // Coordinates unchanged — only refresh non-position metadata
-          state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
+        // --- 1. AP MAC Tracking & Dominant AP Selection ---
+        let isDominantAp = true;
+
+        if (incomingApMac && incomingRssi !== null) {
+          const now = Date.now();
+          // Store/update reading in AP cache
+          state.apCache[incomingApMac] = {
+            rssi: incomingRssi,
+            x: incoming.x,
+            y: incoming.y,
+            last_seen: incoming.last_seen || now,
+          };
+
+          // Find AP MAC with strongest (highest) RSSI reading
+          let bestApMac = incomingApMac;
+          let bestRssi = incomingRssi;
+
+          Object.keys(state.apCache).forEach((mac) => {
+            const entry = state.apCache[mac];
+            const timestamp = entry.last_seen > 1e11 ? entry.last_seen : entry.last_seen * 1000;
+            if (now - timestamp > 15000) {
+              delete state.apCache[mac];
+            } else if (entry.rssi > bestRssi) {
+              bestRssi = entry.rssi;
+              bestApMac = mac;
+            }
+          });
+
+          state.activeApMac = bestApMac;
+
+          // Only accept (x,y) update if coming from the dominant AP (or within 5 dBm of top AP)
+          if (incomingApMac !== bestApMac && incomingRssi < bestRssi - 5) {
+            isDominantAp = false;
+          }
         }
-        // --- BLE Signal Quality Gate ---
-        // Only accept readings where rssi > -65 (strong signal, absolute value < 65 dBm).
-        // Beam index has no restriction — any beam is accepted.
-        // If rssi fails the check, keep the last good bleSignal as fallback.
-        const incomingRssi = responseData.location.rssi ?? null;
-        const incomingBeam = responseData.location.beam ?? null;
 
-        const isGoodReading =
-          incomingRssi !== null &&
-          incomingRssi > -65;
+        // --- 2. Position Quality Gate, AP Locking & Smoothing ---
+        if (!prev) {
+          // First load — initialize position directly
+          state.visitorPos = incoming;
+        } else if (incoming.x !== undefined && incoming.y !== undefined) {
+          const dx = incoming.x - prev.x;
+          const dy = incoming.y - prev.y;
+          const dist = Math.hypot(dx, dy);
+
+          const DEADBAND_THRESHOLD = 30; // ~0.5m noise threshold
+          const MAX_JUMP_THRESHOLD = 500;
+          const isWeakSignal = incomingRssi !== null && incomingRssi < -75;
+
+          if (!isDominantAp) {
+            // Reading came from a weak/distant AP — lock position to current location
+            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
+          } else if (isWeakSignal && dist > DEADBAND_THRESHOLD) {
+            // Weak overall signal — reject position jump
+            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
+          } else if (dist < DEADBAND_THRESHOLD) {
+            // Stationary tag — freeze x/y to eliminate micro-jitter
+            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
+          } else {
+            // Tag is moving under dominant AP — apply EMA position smoothing (alpha = 0.35)
+            const alpha = dist > MAX_JUMP_THRESHOLD ? 1.0 : 0.35;
+            const smoothedX = prev.x + alpha * dx;
+            const smoothedY = prev.y + alpha * dy;
+
+            state.visitorPos = {
+              ...prev,
+              ...incoming,
+              x: smoothedX,
+              y: smoothedY,
+            };
+          }
+        }
+
+        // --- 3. BLE Signal Quality Gate (Diagnostics Box) ---
+        const isGoodReading = incomingRssi !== null && incomingRssi > -55;
 
         if (isGoodReading) {
-          // ✅ Passes quality gate — update with fresh values
           state.bleSignal = {
             rssi: incomingRssi,
             beam: incomingBeam,
-            ap_mac: responseData.location.ap_mac ?? null,
-            last_seen: responseData.location.last_seen ?? null,
+            ap_mac: incomingApMac,
+            last_seen: incoming.last_seen ?? null,
           };
         }
-        // ❌ rssi outside limit — bleSignal stays at last accepted value (fallback)
       }
 
 
