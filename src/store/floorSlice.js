@@ -115,8 +115,8 @@ export const floorSlice = createSlice({
       }
 
       if (responseData.location) {
-        const rawX = responseData.location.pixel_coordinates?.x ?? responseData.location.x;
-        const rawY = responseData.location.pixel_coordinates?.y ?? responseData.location.y;
+        const rawX = responseData.location.x ?? responseData.location.pixel_coordinates?.x;
+        const rawY = responseData.location.y ?? responseData.location.pixel_coordinates?.y;
         const rawXM = responseData.location.smoothed_position?.x_m ?? responseData.location.x_m ?? null;
         const rawYM = responseData.location.smoothed_position?.y_m ?? responseData.location.y_m ?? null;
         const rawRssi = responseData.location.rssi ?? null;
