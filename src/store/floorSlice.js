@@ -18,18 +18,31 @@ const initialState = {
     F1: { mapMeta: null, wayfindingData: null },
   },
   activeRoute: null,
+  // Waypoint & Path Stabilization Queue State
+  routeQueue: [],
+  stableRoute: null,
+  pendingRoute: null,
+  routeMatchCount: 0,
   distance: null,
   proximity: "Tracking Active",
   assets: [],
   // AP MAC signal tracking & active anchor
   apCache: {}, // { [ap_mac]: { rssi, x, y, last_seen } }
   activeApMac: null,
+  // High-speed location queue & moving average smoothing buffer (20-30 window)
+  locationQueue: [],
+  queueCapacity: 25, // Default queue size: 25 samples
+  rssiThreshold: -60, // RSSI signal filter threshold (-60 dBm)
   // BLE signal diagnostics: rssi, beam, ap_mac from Juniper Mist
   bleSignal: {
     rssi: null,   // e.g. -72 (dBm)
+    raw_rssi: null,
     beam: null,   // e.g. 3 (antenna beam index)
     ap_mac: null, // e.g. "c878678a984c"
     last_seen: null,
+    queueSize: 0,
+    queueCapacity: 25,
+    rssiThreshold: -60,
   },
 };
 
@@ -53,6 +66,23 @@ export const floorSlice = createSlice({
         state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
       } else if (newFloor === "F1") {
         state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
+      }
+    },
+
+    setQueueCapacity: (state, action) => {
+      const capacity = Number(action.payload);
+      if (!isNaN(capacity) && capacity >= 5 && capacity <= 50) {
+        state.queueCapacity = capacity;
+        if (state.locationQueue.length > capacity) {
+          state.locationQueue = state.locationQueue.slice(-capacity);
+        }
+      }
+    },
+
+    setRssiThreshold: (state, action) => {
+      const threshold = Number(action.payload);
+      if (!isNaN(threshold)) {
+        state.rssiThreshold = threshold;
       }
     },
 
@@ -83,102 +113,91 @@ export const floorSlice = createSlice({
       }
 
       if (responseData.location) {
-        const incoming = {
-          ...responseData.location,
-          x: responseData.location.pixel_coordinates?.x ?? responseData.location.x,
-          y: responseData.location.pixel_coordinates?.y ?? responseData.location.y,
-        };
-        const prev = state.visitorPos;
+        const rawX = responseData.location.pixel_coordinates?.x ?? responseData.location.x;
+        const rawY = responseData.location.pixel_coordinates?.y ?? responseData.location.y;
+        const rawXM = responseData.location.smoothed_position?.x_m ?? responseData.location.x_m ?? null;
+        const rawYM = responseData.location.smoothed_position?.y_m ?? responseData.location.y_m ?? null;
+        const rawRssi = responseData.location.rssi ?? null;
+        const rawBeam = responseData.location.beam ?? null;
+        const rawApMac = responseData.location.ap_mac ?? null;
 
-        const incomingRssi = incoming.rssi ?? null;
-        const incomingBeam = incoming.beam ?? null;
-        const incomingApMac = incoming.ap_mac ?? null;
+        const currentThreshold = state.rssiThreshold ?? -60;
+        const isInitialLoad = state.locationQueue.length === 0;
+        const isValidCoords = rawX !== undefined && rawY !== undefined && !isNaN(Number(rawX)) && !isNaN(Number(rawY));
 
-        // --- 1. AP MAC Tracking & Dominant AP Selection ---
-        let isDominantAp = true;
-
-        if (incomingApMac && incomingRssi !== null) {
-          const now = Date.now();
-          // Store/update reading in AP cache
-          state.apCache[incomingApMac] = {
-            rssi: incomingRssi,
-            x: incoming.x,
-            y: incoming.y,
-            last_seen: incoming.last_seen || now,
-          };
-
-          // Find AP MAC with strongest (highest) RSSI reading
-          let bestApMac = incomingApMac;
-          let bestRssi = incomingRssi;
-
-          Object.keys(state.apCache).forEach((mac) => {
-            const entry = state.apCache[mac];
-            const timestamp = entry.last_seen > 1e11 ? entry.last_seen : entry.last_seen * 1000;
-            if (now - timestamp > 15000) {
-              delete state.apCache[mac];
-            } else if (entry.rssi > bestRssi) {
-              bestRssi = entry.rssi;
-              bestApMac = mac;
-            }
+        // 1. Initial Load / Refresh: Always seed 1st sample to queue regardless of RSSI for instant display
+        // 2. Subsequent Polls: Push valid samples into 25-sample queue to maintain continuous tracking
+        if (isValidCoords) {
+          if (isInitialLoad) {
+            console.log(`📌 Initial Load / Refresh: Seeded queue with 1st reading (RSSI: ${rawRssi} dBm, X: ${rawX}, Y: ${rawY}).`);
+          }
+          state.locationQueue.push({
+            x: Number(rawX),
+            y: Number(rawY),
+            x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
+            y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
+            rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
+            timestamp: responseData.location.last_seen || Date.now(),
           });
-
-          state.activeApMac = bestApMac;
-
-          // Only accept (x,y) update if coming from the dominant AP (or within 5 dBm of top AP)
-          if (incomingApMac !== bestApMac && incomingRssi < bestRssi - 5) {
-            isDominantAp = false;
-          }
         }
 
-        // --- 2. Position Quality Gate, AP Locking & Smoothing ---
-        if (!prev) {
-          // First load — initialize position directly
-          state.visitorPos = incoming;
-        } else if (incoming.x !== undefined && incoming.y !== undefined) {
-          const dx = incoming.x - prev.x;
-          const dy = incoming.y - prev.y;
-          const dist = Math.hypot(dx, dy);
-
-          const DEADBAND_THRESHOLD = 30; // ~0.5m noise threshold
-          const MAX_JUMP_THRESHOLD = 500;
-          const isWeakSignal = incomingRssi !== null && incomingRssi < -75;
-
-          if (!isDominantAp) {
-            // Reading came from a weak/distant AP — lock position to current location
-            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
-          } else if (isWeakSignal && dist > DEADBAND_THRESHOLD) {
-            // Weak overall signal — reject position jump
-            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
-          } else if (dist < DEADBAND_THRESHOLD) {
-            // Stationary tag — freeze x/y to eliminate micro-jitter
-            state.visitorPos = { ...prev, ...incoming, x: prev.x, y: prev.y };
-          } else {
-            // Tag is moving under dominant AP — apply EMA position smoothing (alpha = 0.35)
-            const alpha = dist > MAX_JUMP_THRESHOLD ? 1.0 : 0.35;
-            const smoothedX = prev.x + alpha * dx;
-            const smoothedY = prev.y + alpha * dy;
-
-            state.visitorPos = {
-              ...prev,
-              ...incoming,
-              x: smoothedX,
-              y: smoothedY,
-            };
-          }
+        // 2. Maintain fixed sliding window size (e.g. 20-30 max samples)
+        if (state.locationQueue.length > state.queueCapacity) {
+          state.locationQueue = state.locationQueue.slice(-state.queueCapacity);
         }
 
-        // --- 3. BLE Signal Quality Gate (Diagnostics Box) ---
-        if (incomingRssi !== null && incomingRssi !== undefined) {
-          state.bleSignal = {
-            rssi: incomingRssi,
-            beam: incomingBeam,
-            ap_mac: incomingApMac,
-            last_seen: incoming.last_seen ?? null,
-            x: incoming.x ?? null,
-            y: incoming.y ?? null,
-            x_m: incoming.smoothed_position?.x_m ?? null,
-            y_m: incoming.smoothed_position?.y_m ?? null,
+        // 3. Compute moving average for (x, y, x_m, y_m, rssi) over queued samples
+        const qLength = state.locationQueue.length;
+        if (qLength > 0) {
+          let sumX = 0, sumY = 0, sumXM = 0, sumYM = 0, sumRssi = 0;
+          let countXM = 0, countYM = 0, countRssi = 0;
+
+          for (let i = 0; i < qLength; i++) {
+            const item = state.locationQueue[i];
+            sumX += item.x;
+            sumY += item.y;
+            if (item.x_m !== null) { sumXM += item.x_m; countXM++; }
+            if (item.y_m !== null) { sumYM += item.y_m; countYM++; }
+            if (item.rssi !== null) { sumRssi += item.rssi; countRssi++; }
+          }
+
+          const avgX = sumX / qLength;
+          const avgY = sumY / qLength;
+          const avgXM = countXM > 0 ? sumXM / countXM : null;
+          const avgYM = countYM > 0 ? sumYM / countYM : null;
+          const avgRssi = countRssi > 0 ? Math.round(sumRssi / countRssi) : rawRssi;
+
+          const incomingAveraged = {
+            ...responseData.location,
+            x: avgX,
+            y: avgY,
+            raw_x: rawX,
+            raw_y: rawY,
+            x_m: avgXM,
+            y_m: avgYM,
           };
+
+          state.visitorPos = incomingAveraged;
+          if (rawApMac) state.activeApMac = rawApMac;
+
+          state.bleSignal = {
+            rssi: avgRssi,
+            raw_rssi: rawRssi,
+            beam: rawBeam,
+            ap_mac: rawApMac,
+            last_seen: responseData.location.last_seen ?? null,
+            x: avgX,
+            y: avgY,
+            x_m: avgXM,
+            y_m: avgYM,
+            queueSize: qLength,
+            queueCapacity: state.queueCapacity,
+            rssiThreshold: currentThreshold,
+          };
+
+          console.log(
+            `📊 Location Queue [${qLength}/${state.queueCapacity}]: Averaged X=${avgX.toFixed(1)}, Y=${avgY.toFixed(1)} (Raw X=${rawX}, Y=${rawY}), RSSI=${avgRssi}dBm`
+          );
         }
       }
 
@@ -204,8 +223,86 @@ export const floorSlice = createSlice({
         state.floorMapData[activeFloorKey].wayfindingData = wayfindingPayload;
         if (state.activeFloor === activeFloorKey) {
           state.wayfindingData = wayfindingPayload;
-          if (wayfindingPayload.route_to_destination) {
-            state.activeRoute = wayfindingPayload.route_to_destination;
+
+          const incomingRoute = wayfindingPayload.route_to_destination || wayfindingPayload.route || wayfindingPayload;
+
+          if (incomingRoute) {
+            // Unpack incoming route waypoints/nodes structure
+            const incomingWaypoints = Array.isArray(incomingRoute)
+              ? incomingRoute
+              : incomingRoute.waypoints || incomingRoute.nodes || incomingRoute.path || [];
+
+            // 1. Initial Load: set stableRoute & activeRoute
+            if (!state.stableRoute || !state.activeRoute) {
+              state.stableRoute = incomingRoute;
+              state.activeRoute = incomingRoute;
+              state.routeQueue = [incomingWaypoints];
+              state.pendingRoute = null;
+              state.routeMatchCount = 0;
+            } else {
+              // 2. Compare incoming waypoints structure with active stableRoute
+              const currentWaypoints = Array.isArray(state.stableRoute)
+                ? state.stableRoute
+                : state.stableRoute.waypoints || state.stableRoute.nodes || state.stableRoute.path || [];
+
+              // Check if node length/sequence matches current stable route
+              const isSameNodeLength = incomingWaypoints.length === currentWaypoints.length;
+
+              if (isSameNodeLength && incomingWaypoints.length > 0) {
+                // Same graph branch: Smooth waypoint coordinates over 5-sample route queue
+                state.pendingRoute = null;
+                state.routeMatchCount = 0;
+                state.routeQueue.push(incomingWaypoints);
+                if (state.routeQueue.length > 5) {
+                  state.routeQueue = state.routeQueue.slice(-5);
+                }
+
+                // Average waypoint (x, y) coordinates across routeQueue for identical indices
+                const queueLen = state.routeQueue.length;
+                const smoothedWaypoints = incomingWaypoints.map((wp, idx) => {
+                  let sumX = 0, sumY = 0, count = 0;
+                  for (let q = 0; q < queueLen; q++) {
+                    const qWp = state.routeQueue[q][idx];
+                    if (qWp) {
+                      const qx = qWp.x ?? qWp[0] ?? qWp.position?.x;
+                      const qy = qWp.y ?? qWp[1] ?? qWp.position?.y;
+                      if (qx !== undefined && qy !== undefined && !isNaN(Number(qx)) && !isNaN(Number(qy))) {
+                        sumX += Number(qx);
+                        sumY += Number(qy);
+                        count++;
+                      }
+                    }
+                  }
+                  if (count > 0) {
+                    return {
+                      ...wp,
+                      x: sumX / count,
+                      y: sumY / count,
+                      position: { x: sumX / count, y: sumY / count },
+                    };
+                  }
+                  return wp;
+                });
+
+                state.activeRoute = {
+                  ...incomingRoute,
+                  waypoints: smoothedWaypoints,
+                  nodes: smoothedWaypoints,
+                  path: smoothedWaypoints,
+                };
+              } else {
+                // Different graph branch proposed: apply 3-poll confirmation hysteresis lock
+                state.routeMatchCount += 1;
+                if (state.routeMatchCount >= 3) {
+                  // Confirmed over 3 polls (750ms hysteresis lock) -> Update stable route
+                  state.stableRoute = incomingRoute;
+                  state.activeRoute = incomingRoute;
+                  state.routeQueue = [incomingWaypoints];
+                  state.pendingRoute = null;
+                  state.routeMatchCount = 0;
+                }
+              }
+            }
           }
         }
       }
@@ -262,6 +359,8 @@ export const floorSlice = createSlice({
 
 export const {
   setFloor,
+  setQueueCapacity,
+  setRssiThreshold,
   setFloorMapDetails,
   updateLiveLocation,
   setActiveRoute,

@@ -36,7 +36,20 @@ function formatLastSeen(last_seen) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen, x, y, x_m, y_m }) => {
+const BleSignalDiagnostics = ({
+  rssi,
+  rawRssi,
+  beam,
+  ap_mac,
+  last_seen,
+  x,
+  y,
+  x_m,
+  y_m,
+  queueSize = 0,
+  queueCapacity = 25,
+  rssiThreshold = -60,
+}) => {
   const quality = getSignalQuality(rssi);
   const isWeak = rssi !== null && rssi < -75;
   const isNoData = rssi === null || rssi === undefined;
@@ -60,34 +73,49 @@ const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen, x, y, x_m, y_m })
           <span className={`ble-diag-dot ble-diag-dot--${quality.color}`} />
           <span className="ble-diag-title">BLE Signal & Live Diagnostics</span>
         </div>
-        <span className={`ble-diag-quality-pill ble-diag-quality-pill--${quality.color}`}>
-          {quality.emoji} {quality.label}
-        </span>
+        <div className="ble-diag-header-pills" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <span className="ble-diag-quality-pill" style={{ background: "#1e1b4b", color: "#a5b4fc", border: "1px solid #3730a3" }}>
+            🎯 Cutoff: &gt; {rssiThreshold} dBm
+          </span>
+          {queueCapacity > 0 && (
+            <span className="ble-diag-quality-pill" style={{ background: "#1e293b", color: "#38bdf8", border: "1px solid #334155" }}>
+              ⚡ Buffer: {queueSize}/{queueCapacity}
+            </span>
+          )}
+          <span className={`ble-diag-quality-pill ble-diag-quality-pill--${quality.color}`}>
+            {quality.emoji} {quality.label}
+          </span>
+        </div>
       </div>
 
       {/* Metrics grid */}
       <div className="ble-diag-grid">
-        {/* Live Coordinates (Pixels) */}
+        {/* Live Coordinates (Pixels - Smoothed Mean) */}
         <div className="ble-diag-metric">
-          <span className="ble-diag-metric-label">Live Coords (px)</span>
+          <span className="ble-diag-metric-label">Smoothed Coords (px)</span>
           <span className="ble-diag-metric-value ble-diag-metric-value--mono">
             {formattedCoordsPx}
           </span>
         </div>
 
-        {/* Live Position (Meters) */}
+        {/* Live Position (Meters - Smoothed Mean) */}
         <div className="ble-diag-metric">
-          <span className="ble-diag-metric-label">Position (m)</span>
+          <span className="ble-diag-metric-label">Smoothed Position (m)</span>
           <span className="ble-diag-metric-value ble-diag-metric-value--mono">
             {formattedCoordsM || "--"}
           </span>
         </div>
 
-        {/* RSSI */}
+        {/* RSSI (Smoothed Average) */}
         <div className="ble-diag-metric">
-          <span className="ble-diag-metric-label">RSSI</span>
+          <span className="ble-diag-metric-label">Avg RSSI</span>
           <span className={`ble-diag-metric-value ble-diag-metric-value--${quality.color}`}>
             {isNoData ? "--" : `${rssi} dBm`}
+            {rawRssi !== null && rawRssi !== undefined && rawRssi !== rssi && (
+              <span style={{ fontSize: "0.75rem", opacity: 0.7, marginLeft: "4px" }}>
+                (Raw: {rawRssi})
+              </span>
+            )}
           </span>
         </div>
 
@@ -119,7 +147,7 @@ const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen, x, y, x_m, y_m })
         <div className="ble-diag-warning">
           <span className="ble-diag-warning-icon">⚠️</span>
           <span className="ble-diag-warning-text">
-            Weak BLE signal. Position may jump due to poor signal quality.
+            Weak BLE signal. Moving average window actively filtering signal noise.
           </span>
         </div>
       )}
