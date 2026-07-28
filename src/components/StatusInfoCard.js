@@ -13,8 +13,14 @@ const StatusInfoCard = ({ floor, visitorInfo, bleLocation, targetCoordinates, di
       : "Pending API Data";
 
   const tagId = bleLocation?.name || visitorInfo?.idNumber || "Tracking BLE Tag...";
-  const formattedDistance = distance !== null && distance !== undefined
-    ? `${Math.round(distance)} units`
+  let distValue = null;
+  if (typeof distance === "number") {
+    distValue = distance;
+  } else if (typeof distance === "object" && distance !== null) {
+    distValue = distance.meters ?? null;
+  }
+  const formattedDistance = distValue !== null && distValue !== undefined && !isNaN(distValue)
+    ? `${Number(distValue).toFixed(1)} m`
     : "--";
 
   return (

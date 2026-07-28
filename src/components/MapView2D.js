@@ -179,8 +179,8 @@ export default function MapView2D({
   const mapWidth = activeMapMeta?.width || 6400;
   const mapHeight = activeMapMeta?.height || 5120;
 
-  // Pixels Per Meter (PPM) resolution hardcoded to 57.28 for consistent scale
-  const ppm = 57.28;
+  // Pixels Per Meter (PPM) resolution from backend map metadata (defaults to 50.0739)
+  const ppm = activeMapMeta?.ppm || 50.07391564392213;
 
   // Calibration settings for current floor (GR or F1)
   const calib = FLOORPLAN_CALIBRATION[floor] || FLOORPLAN_CALIBRATION.GR;
@@ -259,11 +259,17 @@ export default function MapView2D({
     return floor === "GR" ? "/floorplans/GR.png" : "/floorplans/F1.png";
   }, [renderedPdfImage, floor, activeMapMeta]);
 
-  // Calculate distance in meters using hardcoded PPM 57.28
+  // Calculate distance in meters safely (handles number or object from backend)
   const distanceInMeters = useMemo(() => {
-    if (typeof distance !== "number" || isNaN(distance) || distance <= 0)
-      return null;
-    return (distance / ppm).toFixed(1);
+    if (distance === null || distance === undefined) return null;
+    let m = null;
+    if (typeof distance === "number") {
+      m = distance;
+    } else if (typeof distance === "object") {
+      m = distance.meters ?? (distance.pixels ? distance.pixels / ppm : null);
+    }
+    if (m === null || isNaN(m) || m < 0) return null;
+    return m.toFixed(1);
   }, [distance, ppm]);
 
   /**
@@ -699,9 +705,10 @@ export default function MapView2D({
             y1={edge.y1}
             x2={edge.x2}
             y2={edge.y2}
-            stroke="#64748b"
-            strokeWidth="2"
+            stroke="#475569"
+            strokeWidth="1.8"
             strokeDasharray="4 4"
+            opacity="0.7"
           />
         ))} */}
 
@@ -713,23 +720,29 @@ export default function MapView2D({
             node.position.y,
           );
           return (
-            <g key={node.name || idx}>
+            <g key={node.name || idx} className="wayfinding-node-group">
               <circle
-                r="4"
+                r="4.5"
                 cx={svgX}
                 cy={svgY}
-                fill="#334155"
-                stroke="#ffffff"
-                strokeWidth="1.2"
+                fill="#1e293b"
+                stroke="#38bdf8"
+                strokeWidth="1.5"
               />
               {node.name && (
                 <text
                   x={svgX}
-                  y={svgY + 12}
-                  fill="#1e293b"
-                  fontSize="8"
-                  fontWeight="800"
+                  y={svgY - 7}
+                  fill="#0f172a"
+                  fontSize="7.5"
+                  fontWeight="700"
                   textAnchor="middle"
+                  style={{
+                    paintOrder: "stroke",
+                    stroke: "#ffffff",
+                    strokeWidth: "2.5px",
+                    strokeLinejoin: "round",
+                  }}
                 >
                   {node.name}
                 </text>

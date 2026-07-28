@@ -36,10 +36,20 @@ function formatLastSeen(last_seen) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen }) => {
+const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen, x, y, x_m, y_m }) => {
   const quality = getSignalQuality(rssi);
   const isWeak = rssi !== null && rssi < -75;
   const isNoData = rssi === null || rssi === undefined;
+
+  const formattedCoordsPx =
+    x !== null && x !== undefined && y !== null && y !== undefined
+      ? `(${Number(x).toFixed(1)}, ${Number(y).toFixed(1)})`
+      : "--";
+
+  const formattedCoordsM =
+    x_m !== null && x_m !== undefined && y_m !== null && y_m !== undefined
+      ? `(${Number(x_m).toFixed(2)}m, ${Number(y_m).toFixed(2)}m)`
+      : null;
 
   return (
     <div className={`ble-diag-card ${isWeak ? "ble-diag-card--weak" : ""}`}>
@@ -48,7 +58,7 @@ const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen }) => {
         <div className="ble-diag-title-group">
           {/* Animated pulse dot — green if good, amber if fair, red if poor */}
           <span className={`ble-diag-dot ble-diag-dot--${quality.color}`} />
-          <span className="ble-diag-title">BLE Signal Diagnostics</span>
+          <span className="ble-diag-title">BLE Signal & Live Diagnostics</span>
         </div>
         <span className={`ble-diag-quality-pill ble-diag-quality-pill--${quality.color}`}>
           {quality.emoji} {quality.label}
@@ -57,6 +67,22 @@ const BleSignalDiagnostics = ({ rssi, beam, ap_mac, last_seen }) => {
 
       {/* Metrics grid */}
       <div className="ble-diag-grid">
+        {/* Live Coordinates (Pixels) */}
+        <div className="ble-diag-metric">
+          <span className="ble-diag-metric-label">Live Coords (px)</span>
+          <span className="ble-diag-metric-value ble-diag-metric-value--mono">
+            {formattedCoordsPx}
+          </span>
+        </div>
+
+        {/* Live Position (Meters) */}
+        <div className="ble-diag-metric">
+          <span className="ble-diag-metric-label">Position (m)</span>
+          <span className="ble-diag-metric-value ble-diag-metric-value--mono">
+            {formattedCoordsM || "--"}
+          </span>
+        </div>
+
         {/* RSSI */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">RSSI</span>

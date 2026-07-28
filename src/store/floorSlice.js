@@ -83,7 +83,11 @@ export const floorSlice = createSlice({
       }
 
       if (responseData.location) {
-        const incoming = responseData.location;
+        const incoming = {
+          ...responseData.location,
+          x: responseData.location.pixel_coordinates?.x ?? responseData.location.x,
+          y: responseData.location.pixel_coordinates?.y ?? responseData.location.y,
+        };
         const prev = state.visitorPos;
 
         const incomingRssi = incoming.rssi ?? null;
@@ -164,23 +168,30 @@ export const floorSlice = createSlice({
         }
 
         // --- 3. BLE Signal Quality Gate (Diagnostics Box) ---
-        const isGoodReading = incomingRssi !== null && incomingRssi > -55;
-
-        if (isGoodReading) {
+        if (incomingRssi !== null && incomingRssi !== undefined) {
           state.bleSignal = {
             rssi: incomingRssi,
             beam: incomingBeam,
             ap_mac: incomingApMac,
             last_seen: incoming.last_seen ?? null,
+            x: incoming.x ?? null,
+            y: incoming.y ?? null,
+            x_m: incoming.smoothed_position?.x_m ?? null,
+            y_m: incoming.smoothed_position?.y_m ?? null,
           };
         }
       }
 
+      // Update mapMeta & wayfindingData for appropriate floor
+      const activeFloorKey =
+        responseData.map?.id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
+        responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
+          ? "F1"
+          : "GR";
 
-      // Update mapMeta & wayfindingData for GR floor only
       if (responseData.map) {
-        state.floorMapData.GR.mapMeta = responseData.map;
-        if (state.activeFloor === "GR") {
+        state.floorMapData[activeFloorKey].mapMeta = responseData.map;
+        if (state.activeFloor === activeFloorKey) {
           state.mapMeta = responseData.map;
         }
       }
@@ -190,8 +201,8 @@ export const floorSlice = createSlice({
         responseData.wayfinding_path ||
         responseData.map?.wayfinding_path;
       if (wayfindingPayload) {
-        state.floorMapData.GR.wayfindingData = wayfindingPayload;
-        if (state.activeFloor === "GR") {
+        state.floorMapData[activeFloorKey].wayfindingData = wayfindingPayload;
+        if (state.activeFloor === activeFloorKey) {
           state.wayfindingData = wayfindingPayload;
           if (wayfindingPayload.route_to_destination) {
             state.activeRoute = wayfindingPayload.route_to_destination;
@@ -200,24 +211,38 @@ export const floorSlice = createSlice({
       }
 
       // Target coordinates for F1 (Cabinet) and GR (Lift)
-      if (state.activeFloor === "F1") {
+      if (responseData.target_coordinates?.x !== undefined && responseData.target_coordinates?.y !== undefined) {
+        state.targetPos = {
+          x: responseData.target_coordinates.x,
+          y: responseData.target_coordinates.y,
+          x_m: responseData.target_coordinates.x_m,
+          y_m: responseData.target_coordinates.y_m,
+        };
+      } else if (state.activeFloor === "F1") {
         state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
       } else if (state.activeFloor === "GR") {
         state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
       }
 
-      // Distance calculation: from Live BLE on GR, from F1 Lift on F1
-      const startX =
-        state.activeFloor === "F1" ? F1_LIFT_COORDINATES.x : state.visitorPos?.x;
-      const startY =
-        state.activeFloor === "F1" ? F1_LIFT_COORDINATES.y : state.visitorPos?.y;
+      // Distance calculation (Meters): Prioritize backend responseData.distance.meters
+      if (responseData.distance?.meters !== undefined) {
+        state.distance = responseData.distance.meters;
+      } else if (typeof responseData.distance === "number") {
+        const activePpm = state.mapMeta?.ppm || 50.07391564392213;
+        state.distance = responseData.distance / activePpm;
+      } else {
+        const startX =
+          state.activeFloor === "F1" ? F1_LIFT_COORDINATES.x : state.visitorPos?.x;
+        const startY =
+          state.activeFloor === "F1" ? F1_LIFT_COORDINATES.y : state.visitorPos?.y;
 
-      if (startX !== undefined && state.targetPos?.x !== undefined) {
-        const dx = state.targetPos.x - startX;
-        const dy = state.targetPos.y - startY;
-        state.distance = Math.sqrt(dx * dx + dy * dy);
-      } else if (responseData.distance !== undefined) {
-        state.distance = responseData.distance;
+        if (startX !== undefined && state.targetPos?.x !== undefined) {
+          const dx = state.targetPos.x - startX;
+          const dy = state.targetPos.y - startY;
+          const distPixels = Math.sqrt(dx * dx + dy * dy);
+          const activePpm = state.mapMeta?.ppm || 50.07391564392213;
+          state.distance = distPixels / activePpm;
+        }
       }
 
       if (responseData.proximity) {

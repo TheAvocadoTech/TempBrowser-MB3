@@ -14,12 +14,10 @@ import BleSignalDiagnostics from "./components/BleSignalDiagnostics";
 // import CommonButton from "./components/CommonButton";
 import {
   getVisitorLocation,
-  getNavigationRoute,
   getMapDetails,
 } from "./services/api";
 import {
   LIFT_COORDINATES,
-  F1_LIFT_COORDINATES,
   CABINET_COORDINATES,
   FLOOR_MAP_IDS,
 } from "./constants";
@@ -114,55 +112,13 @@ export default function App() {
         });
 
 
-        let mapId, fromX, fromY, finalX, finalY;
-        if (activeFloor === "GR") {
-          // On GR, route starts from Live BLE location and goes to GR Lift:
-          mapId = FLOOR_MAP_IDS.GR;
-          fromX = bleX;
-          fromY = bleY;
-          finalX = LIFT_COORDINATES.x;
-          finalY = LIFT_COORDINATES.y;
-        } else {
-          // On F1, route starts from Live BLE location and goes to Cabinet:
-          mapId = FLOOR_MAP_IDS.F1;
-          fromX = bleX;
-          fromY = bleY;
-          finalX = CABINET_COORDINATES.x;
-          finalY = CABINET_COORDINATES.y;
-        }
-
-        // Calculate navigation route
-        if (
-          mapId &&
-          fromX !== undefined &&
-          fromY !== undefined &&
-          finalX !== undefined &&
-          finalY !== undefined
-        ) {
-          try {
-            const routeRes = await getNavigationRoute(
-              mapId,
-              fromX,
-              fromY,
-              finalX,
-              finalY,
-            );
-            const routePayload =
-              routeRes?.data?.route || routeRes?.route || routeRes?.data;
-
-            if (routePayload) {
-              console.log("🗺️ RECEIVED ROUTE FROM BACKEND:", routePayload);
-              dispatch(setActiveRoute(routePayload));
-            }
-          } catch (routeErr) {
-            console.warn("Route API notice:", routeErr.message);
-          }
-        }
+        // Official wayfinding path is already included in getVisitorLocation payload (responseData.wayfinding.route_to_destination).
+        // Using responseData.wayfinding.route_to_destination avoids unnecessary path re-calculation and flickering on every poll.
       }
     } catch (err) {
       console.warn("Realtime location poll notice:", err.message);
     }
-  }, [activeFloor, dispatch]);
+  }, [dispatch]);
 
   // Real-time backend polling interval
   useEffect(() => {
@@ -170,7 +126,7 @@ export default function App() {
 
     const interval = setInterval(() => {
       fetchRealtimeLocation();
-    }, 3000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [fetchRealtimeLocation]);
@@ -179,10 +135,6 @@ export default function App() {
     if (newFloor !== activeFloor) {
       dispatch(setFloor(newFloor));
     }
-  };
-
-  const handleCommonButtonClick = () => {
-    console.log("Common action clicked");
   };
 
   return (
@@ -207,12 +159,16 @@ export default function App() {
           />
         </main>
 
-        {/* BLE Signal Diagnostics — shown inside the map card area */}
+        {/* BLE Signal & Live Diagnostics — shown inside the map card area */}
         <BleSignalDiagnostics
           rssi={bleSignal?.rssi}
           beam={bleSignal?.beam}
           ap_mac={bleSignal?.ap_mac}
           last_seen={bleSignal?.last_seen}
+          x={bleSignal?.x}
+          y={bleSignal?.y}
+          x_m={bleSignal?.x_m}
+          y_m={bleSignal?.y_m}
         />
 
         {/* Bottom Navigation Section */}
