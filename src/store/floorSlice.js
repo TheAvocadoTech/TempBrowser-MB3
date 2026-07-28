@@ -23,6 +23,8 @@ const initialState = {
   stableRoute: null,
   pendingRoute: null,
   routeMatchCount: 0,
+  lastPathPos: null, // { x, y } coordinates when path was last recalculated
+  minPathMovementMeters: 0.5, // Minimum movement threshold to update path (0.5m)
   distance: null,
   proximity: "Tracking Active",
   assets: [],
@@ -227,6 +229,20 @@ export const floorSlice = createSlice({
         }
       }
 
+      // Distance moved check to freeze route when stationary
+      let hasMovedSignificantly = false;
+      if (!state.lastPathPos || !state.activeRoute) {
+        hasMovedSignificantly = true;
+      } else if (state.visitorPos?.x !== undefined && state.visitorPos?.y !== undefined) {
+        const dx = state.visitorPos.x - state.lastPathPos.x;
+        const dy = state.visitorPos.y - state.lastPathPos.y;
+        const distPixels = Math.sqrt(dx * dx + dy * dy);
+        const activePpm = state.mapMeta?.ppm || 50.07391564392213;
+        const distMeters = distPixels / activePpm;
+        const thresholdM = state.minPathMovementMeters ?? 0.5;
+        hasMovedSignificantly = distMeters >= thresholdM;
+      }
+
       const wayfindingPayload =
         responseData.wayfinding ||
         responseData.wayfinding_path ||
@@ -236,82 +252,93 @@ export const floorSlice = createSlice({
         if (state.activeFloor === activeFloorKey) {
           state.wayfindingData = wayfindingPayload;
 
-          const incomingRoute = wayfindingPayload.route_to_destination || wayfindingPayload.route || wayfindingPayload;
+          if (hasMovedSignificantly || !state.activeRoute) {
+            const incomingRoute = wayfindingPayload.route_to_destination || wayfindingPayload.route || wayfindingPayload;
 
-          if (incomingRoute) {
-            // Unpack incoming route waypoints/nodes structure
-            const incomingWaypoints = Array.isArray(incomingRoute)
-              ? incomingRoute
-              : incomingRoute.waypoints || incomingRoute.nodes || incomingRoute.path || [];
+            if (incomingRoute) {
+              // Unpack incoming route waypoints/nodes structure
+              const incomingWaypoints = Array.isArray(incomingRoute)
+                ? incomingRoute
+                : incomingRoute.waypoints || incomingRoute.nodes || incomingRoute.path || [];
 
-            // 1. Initial Load: set stableRoute & activeRoute
-            if (!state.stableRoute || !state.activeRoute) {
-              state.stableRoute = incomingRoute;
-              state.activeRoute = incomingRoute;
-              state.routeQueue = [incomingWaypoints];
-              state.pendingRoute = null;
-              state.routeMatchCount = 0;
-            } else {
-              // 2. Compare incoming waypoints structure with active stableRoute
-              const currentWaypoints = Array.isArray(state.stableRoute)
-                ? state.stableRoute
-                : state.stableRoute.waypoints || state.stableRoute.nodes || state.stableRoute.path || [];
-
-              // Check if node length/sequence matches current stable route
-              const isSameNodeLength = incomingWaypoints.length === currentWaypoints.length;
-
-              if (isSameNodeLength && incomingWaypoints.length > 0) {
-                // Same graph branch: Smooth waypoint coordinates over 5-sample route queue
+              // 1. Initial Load: set stableRoute & activeRoute
+              if (!state.stableRoute || !state.activeRoute) {
+                state.stableRoute = incomingRoute;
+                state.activeRoute = incomingRoute;
+                state.routeQueue = [incomingWaypoints];
                 state.pendingRoute = null;
                 state.routeMatchCount = 0;
-                state.routeQueue.push(incomingWaypoints);
-                if (state.routeQueue.length > 5) {
-                  state.routeQueue = state.routeQueue.slice(-5);
+                if (state.visitorPos?.x !== undefined) {
+                  state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
                 }
-
-                // Average waypoint (x, y) coordinates across routeQueue for identical indices
-                const queueLen = state.routeQueue.length;
-                const smoothedWaypoints = incomingWaypoints.map((wp, idx) => {
-                  let sumX = 0, sumY = 0, count = 0;
-                  for (let q = 0; q < queueLen; q++) {
-                    const qWp = state.routeQueue[q][idx];
-                    if (qWp) {
-                      const qx = qWp.x ?? qWp[0] ?? qWp.position?.x;
-                      const qy = qWp.y ?? qWp[1] ?? qWp.position?.y;
-                      if (qx !== undefined && qy !== undefined && !isNaN(Number(qx)) && !isNaN(Number(qy))) {
-                        sumX += Number(qx);
-                        sumY += Number(qy);
-                        count++;
-                      }
-                    }
-                  }
-                  if (count > 0) {
-                    return {
-                      ...wp,
-                      x: sumX / count,
-                      y: sumY / count,
-                      position: { x: sumX / count, y: sumY / count },
-                    };
-                  }
-                  return wp;
-                });
-
-                state.activeRoute = {
-                  ...incomingRoute,
-                  waypoints: smoothedWaypoints,
-                  nodes: smoothedWaypoints,
-                  path: smoothedWaypoints,
-                };
               } else {
-                // Different graph branch proposed: apply 3-poll confirmation hysteresis lock
-                state.routeMatchCount += 1;
-                if (state.routeMatchCount >= 3) {
-                  // Confirmed over 3 polls (750ms hysteresis lock) -> Update stable route
-                  state.stableRoute = incomingRoute;
-                  state.activeRoute = incomingRoute;
-                  state.routeQueue = [incomingWaypoints];
+                // 2. Compare incoming waypoints structure with active stableRoute
+                const currentWaypoints = Array.isArray(state.stableRoute)
+                  ? state.stableRoute
+                  : state.stableRoute.waypoints || state.stableRoute.nodes || state.stableRoute.path || [];
+
+                // Check if node length/sequence matches current stable route
+                const isSameNodeLength = incomingWaypoints.length === currentWaypoints.length;
+
+                if (isSameNodeLength && incomingWaypoints.length > 0) {
+                  // Same graph branch: Smooth waypoint coordinates over 5-sample route queue
                   state.pendingRoute = null;
                   state.routeMatchCount = 0;
+                  state.routeQueue.push(incomingWaypoints);
+                  if (state.routeQueue.length > 5) {
+                    state.routeQueue = state.routeQueue.slice(-5);
+                  }
+
+                  // Average waypoint (x, y) coordinates across routeQueue for identical indices
+                  const queueLen = state.routeQueue.length;
+                  const smoothedWaypoints = incomingWaypoints.map((wp, idx) => {
+                    let sumX = 0, sumY = 0, count = 0;
+                    for (let q = 0; q < queueLen; q++) {
+                      const qWp = state.routeQueue[q][idx];
+                      if (qWp) {
+                        const qx = qWp.x ?? qWp[0] ?? qWp.position?.x;
+                        const qy = qWp.y ?? qWp[1] ?? qWp.position?.y;
+                        if (qx !== undefined && qy !== undefined && !isNaN(Number(qx)) && !isNaN(Number(qy))) {
+                          sumX += Number(qx);
+                          sumY += Number(qy);
+                          count++;
+                        }
+                      }
+                    }
+                    if (count > 0) {
+                      return {
+                        ...wp,
+                        x: sumX / count,
+                        y: sumY / count,
+                        position: { x: sumX / count, y: sumY / count },
+                      };
+                    }
+                    return wp;
+                  });
+
+                  state.activeRoute = {
+                    ...incomingRoute,
+                    waypoints: smoothedWaypoints,
+                    nodes: smoothedWaypoints,
+                    path: smoothedWaypoints,
+                  };
+                  if (state.visitorPos?.x !== undefined) {
+                    state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
+                  }
+                } else {
+                  // Different graph branch proposed: apply 3-poll confirmation hysteresis lock
+                  state.routeMatchCount += 1;
+                  if (state.routeMatchCount >= 3) {
+                    // Confirmed over 3 polls (750ms hysteresis lock) -> Update stable route
+                    state.stableRoute = incomingRoute;
+                    state.activeRoute = incomingRoute;
+                    state.routeQueue = [incomingWaypoints];
+                    state.pendingRoute = null;
+                    state.routeMatchCount = 0;
+                    if (state.visitorPos?.x !== undefined) {
+                      state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
+                    }
+                  }
                 }
               }
             }
