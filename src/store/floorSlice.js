@@ -29,9 +29,9 @@ const initialState = {
   // AP MAC signal tracking & active anchor
   apCache: {}, // { [ap_mac]: { rssi, x, y, last_seen } }
   activeApMac: null,
-  // High-speed location queue & moving average smoothing buffer (20-30 window)
+  // High-speed location queue & moving average smoothing buffer (30 window)
   locationQueue: [],
-  queueCapacity: 25, // Default queue size: 25 samples
+  queueCapacity: 30, // Default queue size: 30 samples
   rssiThreshold: -60, // RSSI signal filter threshold (-60 dBm)
   // BLE signal diagnostics: rssi, beam, ap_mac from Juniper Mist
   bleSignal: {
@@ -41,7 +41,7 @@ const initialState = {
     ap_mac: null, // e.g. "c878678a984c"
     last_seen: null,
     queueSize: 0,
-    queueCapacity: 25,
+    queueCapacity: 30,
     rssiThreshold: -60,
   },
 };
@@ -124,21 +124,33 @@ export const floorSlice = createSlice({
         const currentThreshold = state.rssiThreshold ?? -60;
         const isInitialLoad = state.locationQueue.length === 0;
         const isValidCoords = rawX !== undefined && rawY !== undefined && !isNaN(Number(rawX)) && !isNaN(Number(rawY));
+        const passesThreshold = rawRssi === null || isNaN(Number(rawRssi)) || Number(rawRssi) > currentThreshold;
 
         // 1. Initial Load / Refresh: Always seed 1st sample to queue regardless of RSSI for instant display
-        // 2. Subsequent Polls: Push valid samples into 25-sample queue to maintain continuous tracking
+        // 2. Subsequent Polls: Push samples into queue ONLY if they pass RSSI threshold (> -60 dBm)
         if (isValidCoords) {
           if (isInitialLoad) {
             console.log(`📌 Initial Load / Refresh: Seeded queue with 1st reading (RSSI: ${rawRssi} dBm, X: ${rawX}, Y: ${rawY}).`);
+            state.locationQueue.push({
+              x: Number(rawX),
+              y: Number(rawY),
+              x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
+              y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
+              rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
+              timestamp: responseData.location.last_seen || Date.now(),
+            });
+          } else if (passesThreshold) {
+            state.locationQueue.push({
+              x: Number(rawX),
+              y: Number(rawY),
+              x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
+              y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
+              rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
+              timestamp: responseData.location.last_seen || Date.now(),
+            });
+          } else {
+            console.log(`⚠️ Blocked RSSI sample (${rawRssi} dBm <= ${currentThreshold} dBm threshold). Preserved previous queue state.`);
           }
-          state.locationQueue.push({
-            x: Number(rawX),
-            y: Number(rawY),
-            x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
-            y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
-            rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
-            timestamp: responseData.location.last_seen || Date.now(),
-          });
         }
 
         // 2. Maintain fixed sliding window size (e.g. 20-30 max samples)
