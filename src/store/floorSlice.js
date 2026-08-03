@@ -1,49 +1,40 @@
+// src/store/floorSlice.js
 import { createSlice } from "@reduxjs/toolkit";
-import {
-  LIFT_COORDINATES,
-  F1_LIFT_COORDINATES,
-  CABINET_COORDINATES,
-} from "../constants";
 
 const initialState = {
-  activeFloor: "GR", // 'GR' or 'F1'
+  activeFloor: "GR",
   visitorInfo: null,
-  visitorPos: null, // { x, y, name, mac, map_id }
-  targetPos: { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y }, // Default GR Lift target
+  visitorPos: null,
+  targetPos: null,
   mapMeta: null,
   wayfindingData: null,
-  // Separate Map Details & Wayfinding Nodes for each floor
   floorMapData: {
     GR: { mapMeta: null, wayfindingData: null },
     F1: { mapMeta: null, wayfindingData: null },
   },
   activeRoute: null,
-  // Waypoint & Path Stabilization Queue State
   routeQueue: [],
   stableRoute: null,
   pendingRoute: null,
   routeMatchCount: 0,
-  lastPathPos: null, // { x, y } coordinates when path was last recalculated
-  minPathMovementMeters: 0.5, // Minimum movement threshold to update path (0.5m)
+  lastPathPos: null,
+  minPathMovementMeters: 0.5,
   distance: null,
   proximity: "Tracking Active",
   assets: [],
-  // AP MAC signal tracking & active anchor
-  apCache: {}, // { [ap_mac]: { rssi, x, y, last_seen } }
+  apCache: {},
   activeApMac: null,
-  // High-speed location queue & moving average smoothing buffer (30 window)
   locationQueue: [],
-  queueCapacity: 30, // Default queue size: 30 samples
-  rssiThreshold: -60, // RSSI signal filter threshold (-60 dBm)
-  // BLE signal diagnostics: rssi, beam, ap_mac from Juniper Mist
+  queueCapacity: 80, // increased for smoother averaging
+  rssiThreshold: -60,
   bleSignal: {
-    rssi: null,   // e.g. -72 (dBm)
+    rssi: null,
     raw_rssi: null,
-    beam: null,   // e.g. 3 (antenna beam index)
-    ap_mac: null, // e.g. "c878678a984c"
+    beam: null,
+    ap_mac: null,
     last_seen: null,
     queueSize: 0,
-    queueCapacity: 30,
+    queueCapacity: 150,
     rssiThreshold: -60,
   },
 };
@@ -56,24 +47,15 @@ export const floorSlice = createSlice({
       const newFloor = action.payload;
       state.activeFloor = newFloor;
       state.activeRoute = null;
-
-      // Update active mapMeta and wayfindingData for the selected floor
       if (state.floorMapData[newFloor]) {
         state.mapMeta = state.floorMapData[newFloor].mapMeta;
         state.wayfindingData = state.floorMapData[newFloor].wayfindingData;
-      }
-
-      // Update target position based on floor selection
-      if (newFloor === "GR") {
-        state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
-      } else if (newFloor === "F1") {
-        state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
       }
     },
 
     setQueueCapacity: (state, action) => {
       const capacity = Number(action.payload);
-      if (!isNaN(capacity) && capacity >= 5 && capacity <= 50) {
+      if (!isNaN(capacity) && capacity >= 5 && capacity <= 80) {
         state.queueCapacity = capacity;
         if (state.locationQueue.length > capacity) {
           state.locationQueue = state.locationQueue.slice(-capacity);
@@ -91,12 +73,7 @@ export const floorSlice = createSlice({
     setFloorMapDetails: (state, action) => {
       const { floor, mapMeta, wayfindingData } = action.payload;
       if (floor) {
-        state.floorMapData[floor] = {
-          mapMeta: mapMeta || null,
-          wayfindingData: wayfindingData || null,
-        };
-
-        // If the active floor matches, update current mapMeta & wayfindingData
+        state.floorMapData[floor] = { mapMeta, wayfindingData };
         if (state.activeFloor === floor) {
           state.mapMeta = mapMeta || null;
           state.wayfindingData = wayfindingData || null;
@@ -114,108 +91,163 @@ export const floorSlice = createSlice({
         state.visitorInfo = responseData.visitor;
       }
 
+      // ---- LOCATION & BLE SIGNAL ----
       if (responseData.location) {
-        const rawX = responseData.location.x ?? responseData.location.pixel_coordinates?.x;
-        const rawY = responseData.location.y ?? responseData.location.pixel_coordinates?.y;
-        const rawXM = responseData.location.smoothed_position?.x_m ?? responseData.location.x_m ?? null;
-        const rawYM = responseData.location.smoothed_position?.y_m ?? responseData.location.y_m ?? null;
+        const rawX =
+          responseData.location.x ?? responseData.location.pixel_coordinates?.x;
+        const rawY =
+          responseData.location.y ?? responseData.location.pixel_coordinates?.y;
+        const rawXM =
+          responseData.location.smoothed_position?.x_m ??
+          responseData.location.x_m ??
+          null;
+        const rawYM =
+          responseData.location.smoothed_position?.y_m ??
+          responseData.location.y_m ??
+          null;
         const rawRssi = responseData.location.rssi ?? null;
         const rawBeam = responseData.location.beam ?? null;
         const rawApMac = responseData.location.ap_mac ?? null;
 
-        const currentThreshold = state.rssiThreshold ?? -60;
-        const isInitialLoad = state.locationQueue.length === 0;
-        const isValidCoords = rawX !== undefined && rawY !== undefined && !isNaN(Number(rawX)) && !isNaN(Number(rawY));
-        const passesThreshold = rawRssi === null || isNaN(Number(rawRssi)) || Number(rawRssi) > currentThreshold;
+        // Always update visitorPos
+        state.visitorPos = {
+          x: rawX ?? null,
+          y: rawY ?? null,
+          x_m: rawXM,
+          y_m: rawYM,
+          rssi: rawRssi,
+          beam: rawBeam,
+          ap_mac: rawApMac,
+        };
 
-        // 1. Initial Load / Refresh: Always seed 1st sample to queue regardless of RSSI for instant display
-        // 2. Subsequent Polls: Push samples into queue ONLY if they pass RSSI threshold (> -60 dBm)
+        // Update bleSignal immediately
+        state.bleSignal = {
+          rssi: rawRssi,
+          raw_rssi: rawRssi,
+          beam: rawBeam,
+          ap_mac: rawApMac,
+          last_seen: responseData.location.last_seen ?? null,
+          x: rawX,
+          y: rawY,
+          x_m: rawXM,
+          y_m: rawYM,
+          queueSize: state.locationQueue.length,
+          queueCapacity: state.queueCapacity,
+          rssiThreshold: state.rssiThreshold,
+        };
+
+        // Queue logic
+        const isValidCoords =
+          rawX !== undefined &&
+          rawX !== null &&
+          !isNaN(Number(rawX)) &&
+          rawY !== undefined &&
+          rawY !== null &&
+          !isNaN(Number(rawY));
+        const passesThreshold =
+          rawRssi === null ||
+          isNaN(Number(rawRssi)) ||
+          Number(rawRssi) > state.rssiThreshold;
+
         if (isValidCoords) {
-          if (isInitialLoad) {
-            console.log(`📌 Initial Load / Refresh: Seeded queue with 1st reading (RSSI: ${rawRssi} dBm, X: ${rawX}, Y: ${rawY}).`);
+          if (state.locationQueue.length === 0 || passesThreshold) {
             state.locationQueue.push({
               x: Number(rawX),
               y: Number(rawY),
-              x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
-              y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
-              rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
+              x_m:
+                rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
+              y_m:
+                rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
+              rssi:
+                rawRssi !== null && !isNaN(Number(rawRssi))
+                  ? Number(rawRssi)
+                  : null,
               timestamp: responseData.location.last_seen || Date.now(),
             });
-          } else if (passesThreshold) {
-            state.locationQueue.push({
-              x: Number(rawX),
-              y: Number(rawY),
-              x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
-              y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
-              rssi: rawRssi !== null && !isNaN(Number(rawRssi)) ? Number(rawRssi) : null,
-              timestamp: responseData.location.last_seen || Date.now(),
-            });
-          } else {
-            console.log(`⚠️ Blocked RSSI sample (${rawRssi} dBm <= ${currentThreshold} dBm threshold). Preserved previous queue state.`);
-          }
-        }
-
-        // 2. Maintain fixed sliding window size (e.g. 20-30 max samples)
-        if (state.locationQueue.length > state.queueCapacity) {
-          state.locationQueue = state.locationQueue.slice(-state.queueCapacity);
-        }
-
-        // 3. Compute moving average for (x, y, x_m, y_m, rssi) over queued samples
-        const qLength = state.locationQueue.length;
-        if (qLength > 0) {
-          let sumX = 0, sumY = 0, sumXM = 0, sumYM = 0, sumRssi = 0;
-          let countXM = 0, countYM = 0, countRssi = 0;
-
-          for (let i = 0; i < qLength; i++) {
-            const item = state.locationQueue[i];
-            sumX += item.x;
-            sumY += item.y;
-            if (item.x_m !== null) { sumXM += item.x_m; countXM++; }
-            if (item.y_m !== null) { sumYM += item.y_m; countYM++; }
-            if (item.rssi !== null) { sumRssi += item.rssi; countRssi++; }
           }
 
-          const avgX = sumX / qLength;
-          const avgY = sumY / qLength;
-          const avgXM = countXM > 0 ? sumXM / countXM : null;
-          const avgYM = countYM > 0 ? sumYM / countYM : null;
-          const avgRssi = countRssi > 0 ? Math.round(sumRssi / countRssi) : rawRssi;
+          if (state.locationQueue.length > state.queueCapacity) {
+            state.locationQueue = state.locationQueue.slice(
+              -state.queueCapacity,
+            );
+          }
 
-          const incomingAveraged = {
-            ...responseData.location,
-            x: avgX,
-            y: avgY,
-            raw_x: rawX,
-            raw_y: rawY,
-            x_m: avgXM,
-            y_m: avgYM,
-          };
+          // Weighted averaging
+          const qLength = state.locationQueue.length;
+          if (qLength > 0) {
+            const weights = [];
+            let sumWeight = 0;
+            for (let i = 0; i < qLength; i++) {
+              const w = Math.pow(0.9, qLength - 1 - i);
+              weights.push(w);
+              sumWeight += w;
+            }
 
-          state.visitorPos = incomingAveraged;
-          if (rawApMac) state.activeApMac = rawApMac;
+            let sumX = 0,
+              sumY = 0,
+              sumXM = 0,
+              sumYM = 0,
+              sumRssi = 0;
+            let countXM = 0,
+              countYM = 0,
+              countRssi = 0;
 
-          state.bleSignal = {
-            rssi: avgRssi,
-            raw_rssi: rawRssi,
-            beam: rawBeam,
-            ap_mac: rawApMac,
-            last_seen: responseData.location.last_seen ?? null,
-            x: avgX,
-            y: avgY,
-            x_m: avgXM,
-            y_m: avgYM,
-            queueSize: qLength,
-            queueCapacity: state.queueCapacity,
-            rssiThreshold: currentThreshold,
-          };
+            for (let i = 0; i < qLength; i++) {
+              const item = state.locationQueue[i];
+              const w = weights[i];
+              sumX += item.x * w;
+              sumY += item.y * w;
+              if (item.x_m !== null) {
+                sumXM += item.x_m * w;
+                countXM += w;
+              }
+              if (item.y_m !== null) {
+                sumYM += item.y_m * w;
+                countYM += w;
+              }
+              if (item.rssi !== null) {
+                sumRssi += item.rssi * w;
+                countRssi += w;
+              }
+            }
 
-          console.log(
-            `📊 Location Queue [${qLength}/${state.queueCapacity}]: Averaged X=${avgX.toFixed(1)}, Y=${avgY.toFixed(1)} (Raw X=${rawX}, Y=${rawY}), RSSI=${avgRssi}dBm`
-          );
+            const avgX = sumX / sumWeight;
+            const avgY = sumY / sumWeight;
+            const avgXM = countXM > 0 ? sumXM / countXM : null;
+            const avgYM = countYM > 0 ? sumYM / countYM : null;
+            const avgRssi =
+              countRssi > 0 ? Math.round(sumRssi / countRssi) : rawRssi;
+
+            state.visitorPos = {
+              ...state.visitorPos,
+              x: avgX,
+              y: avgY,
+              x_m: avgXM,
+              y_m: avgYM,
+              rssi: avgRssi,
+            };
+
+            state.bleSignal = {
+              rssi: avgRssi,
+              raw_rssi: rawRssi,
+              beam: rawBeam,
+              ap_mac: rawApMac,
+              last_seen: responseData.location.last_seen ?? null,
+              x: avgX,
+              y: avgY,
+              x_m: avgXM,
+              y_m: avgYM,
+              queueSize: qLength,
+              queueCapacity: state.queueCapacity,
+              rssiThreshold: state.rssiThreshold,
+            };
+
+            if (rawApMac) state.activeApMac = rawApMac;
+          }
         }
       }
 
-      // Update mapMeta & wayfindingData for appropriate floor
+      // ---- MAP & TARGET ----
       const activeFloorKey =
         responseData.map?.id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
         responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
@@ -229,158 +261,38 @@ export const floorSlice = createSlice({
         }
       }
 
-      // Distance moved check to freeze route when stationary
-      let hasMovedSignificantly = false;
-      if (!state.lastPathPos || !state.activeRoute) {
-        hasMovedSignificantly = true;
-      } else if (state.visitorPos?.x !== undefined && state.visitorPos?.y !== undefined) {
-        const dx = state.visitorPos.x - state.lastPathPos.x;
-        const dy = state.visitorPos.y - state.lastPathPos.y;
-        const distPixels = Math.sqrt(dx * dx + dy * dy);
-        const activePpm = state.mapMeta?.ppm || 50.07391564392213;
-        const distMeters = distPixels / activePpm;
-        const thresholdM = state.minPathMovementMeters ?? 0.5;
-        hasMovedSignificantly = distMeters >= thresholdM;
-      }
-
-      const wayfindingPayload =
-        responseData.wayfinding ||
-        responseData.wayfinding_path ||
-        responseData.map?.wayfinding_path;
-      if (wayfindingPayload) {
-        state.floorMapData[activeFloorKey].wayfindingData = wayfindingPayload;
-        if (state.activeFloor === activeFloorKey) {
-          state.wayfindingData = wayfindingPayload;
-
-          if (hasMovedSignificantly || !state.activeRoute) {
-            const incomingRoute = wayfindingPayload.route_to_destination || wayfindingPayload.route || wayfindingPayload;
-
-            if (incomingRoute) {
-              // Unpack incoming route waypoints/nodes structure
-              const incomingWaypoints = Array.isArray(incomingRoute)
-                ? incomingRoute
-                : incomingRoute.waypoints || incomingRoute.nodes || incomingRoute.path || [];
-
-              // 1. Initial Load: set stableRoute & activeRoute
-              if (!state.stableRoute || !state.activeRoute) {
-                state.stableRoute = incomingRoute;
-                state.activeRoute = incomingRoute;
-                state.routeQueue = [incomingWaypoints];
-                state.pendingRoute = null;
-                state.routeMatchCount = 0;
-                if (state.visitorPos?.x !== undefined) {
-                  state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
-                }
-              } else {
-                // 2. Compare incoming waypoints structure with active stableRoute
-                const currentWaypoints = Array.isArray(state.stableRoute)
-                  ? state.stableRoute
-                  : state.stableRoute.waypoints || state.stableRoute.nodes || state.stableRoute.path || [];
-
-                // Check if node length/sequence matches current stable route
-                const isSameNodeLength = incomingWaypoints.length === currentWaypoints.length;
-
-                if (isSameNodeLength && incomingWaypoints.length > 0) {
-                  // Same graph branch: Smooth waypoint coordinates over 5-sample route queue
-                  state.pendingRoute = null;
-                  state.routeMatchCount = 0;
-                  state.routeQueue.push(incomingWaypoints);
-                  if (state.routeQueue.length > 5) {
-                    state.routeQueue = state.routeQueue.slice(-5);
-                  }
-
-                  // Average waypoint (x, y) coordinates across routeQueue for identical indices
-                  const queueLen = state.routeQueue.length;
-                  const smoothedWaypoints = incomingWaypoints.map((wp, idx) => {
-                    let sumX = 0, sumY = 0, count = 0;
-                    for (let q = 0; q < queueLen; q++) {
-                      const qWp = state.routeQueue[q][idx];
-                      if (qWp) {
-                        const qx = qWp.x ?? qWp[0] ?? qWp.position?.x;
-                        const qy = qWp.y ?? qWp[1] ?? qWp.position?.y;
-                        if (qx !== undefined && qy !== undefined && !isNaN(Number(qx)) && !isNaN(Number(qy))) {
-                          sumX += Number(qx);
-                          sumY += Number(qy);
-                          count++;
-                        }
-                      }
-                    }
-                    if (count > 0) {
-                      return {
-                        ...wp,
-                        x: sumX / count,
-                        y: sumY / count,
-                        position: { x: sumX / count, y: sumY / count },
-                      };
-                    }
-                    return wp;
-                  });
-
-                  state.activeRoute = {
-                    ...incomingRoute,
-                    waypoints: smoothedWaypoints,
-                    nodes: smoothedWaypoints,
-                    path: smoothedWaypoints,
-                  };
-                  if (state.visitorPos?.x !== undefined) {
-                    state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
-                  }
-                } else {
-                  // Different graph branch proposed: apply 3-poll confirmation hysteresis lock
-                  state.routeMatchCount += 1;
-                  if (state.routeMatchCount >= 3) {
-                    // Confirmed over 3 polls (750ms hysteresis lock) -> Update stable route
-                    state.stableRoute = incomingRoute;
-                    state.activeRoute = incomingRoute;
-                    state.routeQueue = [incomingWaypoints];
-                    state.pendingRoute = null;
-                    state.routeMatchCount = 0;
-                    if (state.visitorPos?.x !== undefined) {
-                      state.lastPathPos = { x: state.visitorPos.x, y: state.visitorPos.y };
-                    }
-                  }
-                }
-              }
-            }
-          }
+      // ---- WAYFINDING ----
+      if (responseData.wayfinding) {
+        state.wayfindingData = responseData.wayfinding;
+        if (state.floorMapData[activeFloorKey]) {
+          state.floorMapData[activeFloorKey].wayfindingData =
+            responseData.wayfinding;
+        }
+        if (responseData.wayfinding.route_to_destination) {
+          state.activeRoute = responseData.wayfinding.route_to_destination;
         }
       }
 
-      // Target coordinates for F1 (Cabinet) and GR (Lift)
-      if (responseData.target_coordinates?.x !== undefined && responseData.target_coordinates?.y !== undefined) {
+      // ---- TARGET ----
+      if (
+        responseData.target_coordinates?.x !== undefined &&
+        responseData.target_coordinates?.y !== undefined
+      ) {
         state.targetPos = {
           x: responseData.target_coordinates.x,
           y: responseData.target_coordinates.y,
           x_m: responseData.target_coordinates.x_m,
           y_m: responseData.target_coordinates.y_m,
         };
-      } else if (state.activeFloor === "F1") {
-        state.targetPos = { x: CABINET_COORDINATES.x, y: CABINET_COORDINATES.y };
-      } else if (state.activeFloor === "GR") {
-        state.targetPos = { x: LIFT_COORDINATES.x, y: LIFT_COORDINATES.y };
       }
 
-      // Distance calculation (Meters): Prioritize backend responseData.distance.meters
+      // ---- DISTANCE & PROXIMITY ----
       if (responseData.distance?.meters !== undefined) {
         state.distance = responseData.distance.meters;
       } else if (typeof responseData.distance === "number") {
         const activePpm = state.mapMeta?.ppm || 50.07391564392213;
         state.distance = responseData.distance / activePpm;
-      } else {
-        const startX =
-          state.activeFloor === "F1" ? F1_LIFT_COORDINATES.x : state.visitorPos?.x;
-        const startY =
-          state.activeFloor === "F1" ? F1_LIFT_COORDINATES.y : state.visitorPos?.y;
-
-        if (startX !== undefined && state.targetPos?.x !== undefined) {
-          const dx = state.targetPos.x - startX;
-          const dy = state.targetPos.y - startY;
-          const distPixels = Math.sqrt(dx * dx + dy * dy);
-          const activePpm = state.mapMeta?.ppm || 50.07391564392213;
-          state.distance = distPixels / activePpm;
-        }
       }
-
       if (responseData.proximity) {
         state.proximity = responseData.proximity;
       }
@@ -406,6 +318,5 @@ export const {
   setAssets,
 } = floorSlice.actions;
 
-// Selector: BLE signal diagnostics
 export const selectBleSignal = (state) => state.floor.bleSignal;
 export default floorSlice.reducer;

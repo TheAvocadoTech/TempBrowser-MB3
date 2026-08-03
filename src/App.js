@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useEffect, useCallback, useRef } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
@@ -9,15 +10,12 @@ import {
 import Header from "./components/Header";
 import MapView2D from "./components/MapView2D";
 import BleSignalDiagnostics from "./components/BleSignalDiagnostics";
+// Import the asset polling hook
+import { useAssetPolling } from "./hooks/useAssetPolling";
 // CommonButton is currently unused — kept for future use
 // import CommonButton from "./components/CommonButton";
-import {
-  getVisitorLocation,
-  getMapDetails,
-} from "./services/api";
-import {
-  FLOOR_MAP_IDS,
-} from "./constants";
+import { getVisitorLocation, getMapDetails } from "./services/api";
+import { FLOOR_MAP_IDS } from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
@@ -32,11 +30,15 @@ export default function App() {
   const activeRoute = useSelector((state) => state.floor.activeRoute);
   const distance = useSelector((state) => state.floor.distance);
   const proximity = useSelector((state) => state.floor.proximity);
-  // BLE signal diagnostics (rssi, beam, ap_mac, last_seen, queueSize, queueCapacity)
   const bleSignal = useSelector(selectBleSignal);
+  // Select all assets from Redux (populated by useAssetPolling)
+  const assets = useSelector((state) => state.floor.assets);
 
   // In-flight fetch guard so rapid 250ms polling does not stack pending HTTP requests
   const isFetchingRef = useRef(false);
+
+  // Start asset polling every 5 seconds (separate from visitor location polling)
+  useAssetPolling(5000);
 
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
@@ -134,6 +136,7 @@ export default function App() {
             activeRoute={activeRoute}
             distance={distance}
             proximity={proximity}
+            assets={assets} // ✅ Pass assets to MapView2D
           />
         </main>
 
