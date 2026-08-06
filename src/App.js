@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useEffect, useCallback, useRef } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
@@ -6,21 +5,17 @@ import {
   setFloorMapDetails,
   updateLiveLocation,
   selectBleSignal,
-} from "./store/floorSlice";
+} from "./store/floorSlice"; // <-- remove updateBleSignal
 import Header from "./components/Header";
 import MapView2D from "./components/MapView2D";
 import BleSignalDiagnostics from "./components/BleSignalDiagnostics";
-// Import the asset polling hook
 import { useAssetPolling } from "./hooks/useAssetPolling";
-// CommonButton is currently unused — kept for future use
-// import CommonButton from "./components/CommonButton";
 import { getVisitorLocation, getMapDetails } from "./services/api";
 import { FLOOR_MAP_IDS } from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
 
-  // Redux state selectors
   const activeFloor = useSelector((state) => state.floor.activeFloor);
   const visitorPos = useSelector((state) => state.floor.visitorPos);
   const targetPos = useSelector((state) => state.floor.targetPos);
@@ -31,19 +26,16 @@ export default function App() {
   const distance = useSelector((state) => state.floor.distance);
   const proximity = useSelector((state) => state.floor.proximity);
   const bleSignal = useSelector(selectBleSignal);
-  // Select all assets from Redux (populated by useAssetPolling)
   const assets = useSelector((state) => state.floor.assets);
 
-  // In-flight fetch guard so rapid 250ms polling does not stack pending HTTP requests
   const isFetchingRef = useRef(false);
 
-  // Start asset polling every 5 seconds (separate from visitor location polling)
+  // Start asset polling every 5 seconds
   useAssetPolling(5000);
 
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
     const fetchFloorMaps = async () => {
-      // 1. Fetch GR Floor Map (MB3-F00: 8 nodes)
       try {
         const grRes = await getMapDetails(FLOOR_MAP_IDS.GR);
         if (grRes && (grRes.data || grRes.id)) {
@@ -60,7 +52,6 @@ export default function App() {
         console.warn("GR Map init notice:", err.message);
       }
 
-      // 2. Fetch F1 Floor Map (MB3-F01: 37 nodes)
       try {
         const f1Res = await getMapDetails(FLOOR_MAP_IDS.F1);
         if (f1Res && (f1Res.data || f1Res.id)) {
@@ -91,6 +82,26 @@ export default function App() {
 
       if (data && (data.success || data.location)) {
         dispatch(updateLiveLocation(data));
+        
+        // If the response contains bleSignal, pass it via updateLiveLocation
+        if (data.bleSignal) {
+          dispatch(updateLiveLocation({
+            bleSignal: {
+              rssi: data.bleSignal.rssi,
+              raw_rssi: data.bleSignal.raw_rssi,
+              beam: data.bleSignal.beam,
+              ap_mac: data.bleSignal.ap_mac,
+              last_seen: data.bleSignal.last_seen || Date.now() / 1000,
+              x: data.bleSignal.x,
+              y: data.bleSignal.y,
+              x_m: data.bleSignal.x_m,
+              y_m: data.bleSignal.y_m,
+              queueSize: data.bleSignal.queueSize,
+              queueCapacity: data.bleSignal.queueCapacity,
+              rssiThreshold: data.bleSignal.rssiThreshold,
+            }
+          }));
+        }
       }
     } catch (err) {
       console.warn("Realtime location poll notice:", err.message);
@@ -120,10 +131,8 @@ export default function App() {
   return (
     <div className="app-viewport">
       <div className="mobile-card-container">
-        {/* Header Section */}
         <Header />
 
-        {/* 2D Interactive SVG Navigation Map View */}
         <main className="main-map-section">
           <MapView2D
             floor={activeFloor}
@@ -136,11 +145,10 @@ export default function App() {
             activeRoute={activeRoute}
             distance={distance}
             proximity={proximity}
-            assets={assets} // ✅ Pass assets to MapView2D
+            assets={assets}
           />
         </main>
 
-        {/* BLE Signal & Live Diagnostics — shown inside the map card area */}
         <BleSignalDiagnostics
           rssi={bleSignal?.rssi}
           rawRssi={bleSignal?.raw_rssi}
@@ -154,10 +162,9 @@ export default function App() {
           queueSize={bleSignal?.queueSize}
           queueCapacity={bleSignal?.queueCapacity}
           rssiThreshold={bleSignal?.rssiThreshold}
+          tagMac={bleSignal?.tagMac}        // passed from useAssetPolling
+          tagName={bleSignal?.tagName}
         />
-
-        {/* Bottom Navigation Section */}
-        {/* <CommonButton onClick={handleCommonButtonClick} /> */}
       </div>
     </div>
   );

@@ -1,23 +1,6 @@
+// src/components/BleSignalDiagnostics.js
 import React from "react";
-//
-/**
- * BleSignalDiagnostics
- * ---------------------
- * Displays real-time BLE signal quality diagnostics for the tracked tag:
- *  - RSSI (dBm) with colour-coded quality label
- *  - Antenna beam index
- *  - AP MAC address
- *  - Last seen timestamp
- *  - Warning banner when signal is weak (< -75 dBm)
- *
- * Props:
- *   rssi      {number|null}  e.g. -72
- *   beam      {number|null}  e.g. 3
- *   ap_mac    {string|null}  e.g. "c878678a984c"
- *   last_seen {string|null}  ISO timestamp
- */
 
-// Classify RSSI into quality tiers
 function getSignalQuality(rssi) {
   if (rssi === null || rssi === undefined) return { label: "No Data", color: "grey", emoji: "⚪" };
   if (rssi >= -55) return { label: "Excellent", color: "green", emoji: "🟢" };
@@ -26,7 +9,6 @@ function getSignalQuality(rssi) {
   return { label: "Poor", color: "red", emoji: "🔴" };
 }
 
-// Format last_seen timestamp as a human-readable "X sec ago" string
 function formatLastSeen(last_seen) {
   if (!last_seen) return "--";
   const diff = Math.round((Date.now() - new Date(last_seen * 1000).getTime()) / 1000);
@@ -49,6 +31,8 @@ const BleSignalDiagnostics = ({
   queueSize = 0,
   queueCapacity = 25,
   rssiThreshold = -60,
+  tagMac,        // <-- new prop: MAC address of the tag
+  tagName,       // <-- optional device name
 }) => {
   const quality = getSignalQuality(rssi);
   const isWeak = rssi !== null && rssi < -75;
@@ -64,14 +48,19 @@ const BleSignalDiagnostics = ({
       ? `(${Number(x_m).toFixed(2)}m, ${Number(y_m).toFixed(2)}m)`
       : null;
 
+  // Build a display label for the tag
+  const tagLabel = tagName ? `${tagName} (${tagMac})` : tagMac || "Unknown Tag";
+
   return (
     <div className={`ble-diag-card ${isWeak ? "ble-diag-card--weak" : ""}`}>
-      {/* Header row */}
+      {/* Header with tag identity */}
       <div className="ble-diag-header">
         <div className="ble-diag-title-group">
-          {/* Animated pulse dot — green if good, amber if fair, red if poor */}
           <span className={`ble-diag-dot ble-diag-dot--${quality.color}`} />
           <span className="ble-diag-title">BLE Signal & Live Diagnostics</span>
+          <span style={{ marginLeft: "12px", fontSize: "0.8rem", color: "#94a3b8" }}>
+            📍 {tagLabel}
+          </span>
         </div>
         <div className="ble-diag-header-pills" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
           <span className="ble-diag-quality-pill" style={{ background: "#1e1b4b", color: "#a5b4fc", border: "1px solid #3730a3" }}>
@@ -88,25 +77,20 @@ const BleSignalDiagnostics = ({
         </div>
       </div>
 
-      {/* Metrics grid */}
+      {/* Metrics grid – same as before */}
       <div className="ble-diag-grid">
-        {/* Live Coordinates (Pixels - Smoothed Mean) */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Smoothed Coords (px)</span>
           <span className="ble-diag-metric-value ble-diag-metric-value--mono">
             {formattedCoordsPx}
           </span>
         </div>
-
-        {/* Live Position (Meters - Smoothed Mean) */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Smoothed Position (m)</span>
           <span className="ble-diag-metric-value ble-diag-metric-value--mono">
             {formattedCoordsM || "--"}
           </span>
         </div>
-
-        {/* RSSI (Smoothed Average) */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Avg RSSI</span>
           <span className={`ble-diag-metric-value ble-diag-metric-value--${quality.color}`}>
@@ -118,31 +102,24 @@ const BleSignalDiagnostics = ({
             )}
           </span>
         </div>
-
-        {/* Beam */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Beam Index</span>
           <span className="ble-diag-metric-value">
             {beam !== null && beam !== undefined ? beam : "--"}
           </span>
         </div>
-
-        {/* AP MAC */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">AP MAC</span>
           <span className="ble-diag-metric-value ble-diag-metric-value--mono">
             {ap_mac || "--"}
           </span>
         </div>
-
-        {/* Last Seen */}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Last Seen</span>
           <span className="ble-diag-metric-value">{formatLastSeen(last_seen)}</span>
         </div>
       </div>
 
-      {/* Weak signal warning */}
       {isWeak && (
         <div className="ble-diag-warning">
           <span className="ble-diag-warning-icon">⚠️</span>
