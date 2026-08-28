@@ -1,9 +1,13 @@
 import axios from "axios";
 //
 
-// Base URL points to live backend API at api.avocadotech.in
-const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "https://api.avocadotech.in/api/IDVisitor";
+// Base URL points to local running backend or REACT_APP_API_URL
+const rawBaseUrl =
+  process.env.REACT_APP_API_URL || "http://localhost:8000/api/IDVisitor";
+
+const API_BASE_URL = rawBaseUrl.endsWith("/IDVisitor")
+  ? rawBaseUrl
+  : `${rawBaseUrl.replace(/\/+$/, "")}/IDVisitor`;
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -12,6 +16,29 @@ const apiClient = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+// Automatic fallback to local backend if remote API is unreachable or returns 404/5xx
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config || config._isRetry) {
+      return Promise.reject(error);
+    }
+
+    const isRemote = config.baseURL && !config.baseURL.includes("localhost:8000");
+    if (isRemote) {
+      config._isRetry = true;
+      config.baseURL = "http://localhost:8000/api/IDVisitor";
+      try {
+        return await axios(config);
+      } catch (localErr) {
+        return Promise.reject(localErr);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 let cachedVisitorId = null;
 
@@ -76,8 +103,9 @@ export const getVisitorLocation = async (visitorId = "current") => {
         targetId = urlVisitorId;
       } else if (urlToken) {
         const tokenRes = await getVisitorByToken(urlToken);
-        if (tokenRes && tokenRes.data) {
-          targetId = tokenRes.data._id || tokenRes.data.id;
+        if (tokenRes && (tokenRes.data || tokenRes.id)) {
+          const vData = tokenRes.data || tokenRes;
+          targetId = vData._id || vData.id;
         }
       }
     }
@@ -91,44 +119,55 @@ export const getVisitorLocation = async (visitorId = "current") => {
         targetId = cachedVisitorId;
       } else {
         const visitorsRes = await getAllVisitors();
-        if (
-          visitorsRes?.data &&
-          Array.isArray(visitorsRes.data) &&
-          visitorsRes.data.length > 0
-        ) {
-          const activeVisitor =
-            visitorsRes.data.find((v) => v.idNumber || v._id) ||
-            visitorsRes.data[0];
+        const vList = visitorsRes?.data || (Array.isArray(visitorsRes) ? visitorsRes : []);
+        if (Array.isArray(vList) && vList.length > 0) {
+          const activeVisitor = vList.find((v) => v.idNumber || v._id) || vList[0];
           targetId = activeVisitor._id || activeVisitor.id;
           cachedVisitorId = targetId;
         }
       }
     }
 
-    // Fallback default active visitor ID
+    // Fallback default active visitor ID (Sarath Suresh in DB)
     if (!targetId || !isValidMongoId(targetId)) {
-      targetId = "6a624b4560e3cc3ce7496ccd";
+      targetId = "6a80369e83f5e8026f6444a9";
     }
 
-    const response = await apiClient.get(
-      `/visitors/${targetId}/location?includePath=true`,
-    );
-    return response.data;
-  } catch (error) {
-    if (
-      error.response &&
-      error.response.status === 500 &&
-      visitorId !== "6a624b4560e3cc3ce7496ccd"
-    ) {
-      try {
-        const fallbackRes = await apiClient.get(
-          `/visitors/6a624b4560e3cc3ce7496ccd/location?includePath=true`,
-        );
-        return fallbackRes.data;
-      } catch (fallbackErr) {
-        return { success: false, message: fallbackErr.message, data: null };
+    // Try fetching location for targetId
+    try {
+      const response = await apiClient.get(
+        `/visitors/${targetId}/location?includePath=true`
+      );
+      if (response?.data && (response.data.location || response.data.visitor || response.data.target_coordinates)) {
+        cachedVisitorId = targetId;
+        return response.data;
       }
+    } catch (reqErr) {
+      console.warn(`Location fetch for ${targetId} failed, retrying with fresh visitor lookup...`, reqErr.message);
+      cachedVisitorId = null;
     }
+
+    // If initial fetch failed, query active visitors directly from DB
+    const visitorsRes = await getAllVisitors();
+    const vList = visitorsRes?.data || (Array.isArray(visitorsRes) ? visitorsRes : []);
+    if (Array.isArray(vList) && vList.length > 0) {
+      const activeVisitor = vList[0];
+      targetId = activeVisitor._id || activeVisitor.id;
+      cachedVisitorId = targetId;
+
+      const fallbackRes = await apiClient.get(
+        `/visitors/${targetId}/location?includePath=true`
+      );
+      return fallbackRes.data;
+    }
+
+    return {
+      success: false,
+      message: "Failed to fetch visitor location",
+      data: null,
+    };
+  } catch (error) {
+    cachedVisitorId = null;
     return {
       success: false,
       message: error.message || "Failed to fetch visitor location",
@@ -151,16 +190,14 @@ export const getMapDetails = async (mapId) => {
 };
 
 /**
- * Fetch navigation route between start and end coordinates
+ * Fetch wayfinding path (nodes & edges) for map
  */
-export const getNavigationRoute = async (mapId, fromX, fromY, toX, toY) => {
+export const getWayfindingPath = async (mapId) => {
   try {
-    const response = await apiClient.get(
-      `/maps/${mapId}/route?fromX=${fromX}&fromY=${fromY}&toX=${toX}&toY=${toY}`,
-    );
+    const response = await apiClient.get(`/maps/${mapId}/wayfinding`);
     return response.data;
   } catch (error) {
-    console.warn("Navigation route API notice:", error.message);
+    console.warn("Wayfinding path API notice:", error.message);
     return null;
   }
 };

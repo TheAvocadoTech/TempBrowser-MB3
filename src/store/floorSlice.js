@@ -25,8 +25,8 @@ const initialState = {
   apCache: {},
   activeApMac: null,
   locationQueue: [],
-  queueCapacity: 80, // increased for smoother averaging
-  rssiThreshold: -60,
+  queueCapacity: 8, // optimized for low-latency live walking
+  rssiThreshold: -65,
   bleSignal: {
     rssi: null,
     raw_rssi: null,
@@ -34,8 +34,8 @@ const initialState = {
     ap_mac: null,
     last_seen: null,
     queueSize: 0,
-    queueCapacity: 150,
-    rssiThreshold: -60,
+    queueCapacity: 8,
+    rssiThreshold: -65,
   },
 };
 
@@ -172,13 +172,13 @@ export const floorSlice = createSlice({
             );
           }
 
-          // Weighted averaging
+          // Weighted averaging with responsive recent bias
           const qLength = state.locationQueue.length;
           if (qLength > 0) {
             const weights = [];
             let sumWeight = 0;
             for (let i = 0; i < qLength; i++) {
-              const w = Math.pow(0.9, qLength - 1 - i);
+              const w = Math.pow(0.75, qLength - 1 - i); // Faster response to recent changes
               weights.push(w);
               sumWeight += w;
             }
@@ -253,6 +253,11 @@ export const floorSlice = createSlice({
         responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
           ? "F1"
           : "GR";
+
+      // Auto-sync activeFloor if visitor location is explicitly on a different floor
+      if (responseData.location?.map_id && state.activeFloor !== activeFloorKey) {
+        state.activeFloor = activeFloorKey;
+      }
 
       if (responseData.map) {
         state.floorMapData[activeFloorKey].mapMeta = responseData.map;

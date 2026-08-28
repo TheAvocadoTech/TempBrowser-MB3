@@ -1,20 +1,27 @@
-import React, { useEffect, useCallback, useRef } from "react";
+import React, { useEffect, useCallback, useRef, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
   setFloor,
   setFloorMapDetails,
   updateLiveLocation,
   selectBleSignal,
-} from "./store/floorSlice"; // <-- remove updateBleSignal
+} from "./store/floorSlice";
 import Header from "./components/Header";
 import MapView2D from "./components/MapView2D";
+import MapView3D from "./components/MapView3D";
 import BleSignalDiagnostics from "./components/BleSignalDiagnostics";
 import { useAssetPolling } from "./hooks/useAssetPolling";
-import { getVisitorLocation, getMapDetails } from "./services/api";
+import {
+  getVisitorLocation,
+  getMapDetails,
+  getWayfindingPath,
+} from "./services/api";
 import { FLOOR_MAP_IDS } from "./constants";
 
 export default function App() {
   const dispatch = useDispatch();
+
+  const [viewMode, setViewMode] = useState("2D"); // '2D' | '3D'
 
   const activeFloor = useSelector((state) => state.floor.activeFloor);
   const visitorPos = useSelector((state) => state.floor.visitorPos);
@@ -36,15 +43,28 @@ export default function App() {
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
     const fetchFloorMaps = async () => {
+      // Ground Floor
       try {
-        const grRes = await getMapDetails(FLOOR_MAP_IDS.GR);
-        if (grRes && (grRes.data || grRes.id)) {
-          const grData = grRes.data || grRes;
+        const [grMapRes, grWfRes] = await Promise.allSettled([
+          getMapDetails(FLOOR_MAP_IDS.GR),
+          getWayfindingPath(FLOOR_MAP_IDS.GR),
+        ]);
+
+        const grMapData =
+          grMapRes.status === "fulfilled" && grMapRes.value
+            ? grMapRes.value.data || grMapRes.value
+            : null;
+        const grWfData =
+          grWfRes.status === "fulfilled" && grWfRes.value
+            ? grWfRes.value.data || grWfRes.value
+            : grMapData?.wayfinding_path || null;
+
+        if (grMapData || grWfData) {
           dispatch(
             setFloorMapDetails({
               floor: "GR",
-              mapMeta: grData,
-              wayfindingData: grData.wayfinding_path,
+              mapMeta: grMapData,
+              wayfindingData: grWfData,
             }),
           );
         }
@@ -52,15 +72,28 @@ export default function App() {
         console.warn("GR Map init notice:", err.message);
       }
 
+      // First Floor
       try {
-        const f1Res = await getMapDetails(FLOOR_MAP_IDS.F1);
-        if (f1Res && (f1Res.data || f1Res.id)) {
-          const f1Data = f1Res.data || f1Res;
+        const [f1MapRes, f1WfRes] = await Promise.allSettled([
+          getMapDetails(FLOOR_MAP_IDS.F1),
+          getWayfindingPath(FLOOR_MAP_IDS.F1),
+        ]);
+
+        const f1MapData =
+          f1MapRes.status === "fulfilled" && f1MapRes.value
+            ? f1MapRes.value.data || f1MapRes.value
+            : null;
+        const f1WfData =
+          f1WfRes.status === "fulfilled" && f1WfRes.value
+            ? f1WfRes.value.data || f1WfRes.value
+            : f1MapData?.wayfinding_path || null;
+
+        if (f1MapData || f1WfData) {
           dispatch(
             setFloorMapDetails({
               floor: "F1",
-              mapMeta: f1Data,
-              wayfindingData: f1Data.wayfinding_path,
+              mapMeta: f1MapData,
+              wayfindingData: f1WfData,
             }),
           );
         }
@@ -80,7 +113,22 @@ export default function App() {
     try {
       const data = await getVisitorLocation("current");
 
-      if (data && (data.success || data.location)) {
+      // Console log incoming values for debugging
+      console.log("📡 [Frontend API Response] Live Location & Wayfinding Data:", {
+        visitor: data?.visitor ? `${data.visitor.name || data.visitor.visitorName} (${data.visitor.idNumber || data.visitor.id})` : null,
+        location: data?.location ? { x: data.location.x, y: data.location.y, x_m: data.location.x_m || data.location.smoothed_position?.x_m, y_m: data.location.y_m || data.location.smoothed_position?.y_m, rssi: data.location.rssi } : null,
+        target_coordinates: data?.target_coordinates || null,
+        distance: data?.distance || null,
+        proximity: data?.proximity || null,
+        wayfinding: data?.wayfinding ? {
+          total_nodes: data.wayfinding.total_nodes || data.wayfinding.nodes?.length,
+          route_nodes: data.wayfinding.route_to_destination?.nodes?.length || 0,
+          route_path: data.wayfinding.route_to_destination?.path || [],
+          waypoints: data.wayfinding.route_to_destination?.nodes || []
+        } : "none",
+      });
+
+      if (data && (data.success || data.location || data.target_coordinates)) {
         dispatch(updateLiveLocation(data));
         
         // If the response contains bleSignal, pass it via updateLiveLocation
@@ -102,6 +150,8 @@ export default function App() {
             }
           }));
         }
+      } else {
+        console.warn("⚠️ [Frontend] Received empty or invalid location response:", data);
       }
     } catch (err) {
       console.warn("Realtime location poll notice:", err.message);
@@ -110,14 +160,14 @@ export default function App() {
     }
   }, [dispatch]);
 
-  // Real-time high-speed backend polling interval (250ms)
+  // Real-time backend polling interval (1000ms) with client-side 60fps LERP smoothing
   useEffect(() => {
     fetchRealtimeLocation();
 
-    const FAST_POLL_INTERVAL_MS = 250;
+    const POLL_INTERVAL_MS = 1000;
     const interval = setInterval(() => {
       fetchRealtimeLocation();
-    }, FAST_POLL_INTERVAL_MS);
+    }, POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
   }, [fetchRealtimeLocation]);
@@ -131,22 +181,38 @@ export default function App() {
   return (
     <div className="app-viewport">
       <div className="mobile-card-container">
-        <Header />
+        <Header viewMode={viewMode} onViewModeChange={setViewMode} />
 
         <main className="main-map-section">
-          <MapView2D
-            floor={activeFloor}
-            onFloorChange={handleFloorChange}
-            mapDetails={mapMeta}
-            bleLocation={visitorPos}
-            targetCoordinates={targetPos}
-            wayfindingData={wayfindingData}
-            floorMapData={floorMapData}
-            activeRoute={activeRoute}
-            distance={distance}
-            proximity={proximity}
-            assets={assets}
-          />
+          {viewMode === "3D" ? (
+            <MapView3D
+              floor={activeFloor}
+              onFloorChange={handleFloorChange}
+              mapDetails={mapMeta}
+              bleLocation={visitorPos}
+              targetCoordinates={targetPos}
+              wayfindingData={wayfindingData}
+              floorMapData={floorMapData}
+              activeRoute={activeRoute}
+              distance={distance}
+              proximity={proximity}
+              assets={assets}
+            />
+          ) : (
+            <MapView2D
+              floor={activeFloor}
+              onFloorChange={handleFloorChange}
+              mapDetails={mapMeta}
+              bleLocation={visitorPos}
+              targetCoordinates={targetPos}
+              wayfindingData={wayfindingData}
+              floorMapData={floorMapData}
+              activeRoute={activeRoute}
+              distance={distance}
+              proximity={proximity}
+              assets={assets}
+            />
+          )}
         </main>
 
         <BleSignalDiagnostics
@@ -162,10 +228,10 @@ export default function App() {
           queueSize={bleSignal?.queueSize}
           queueCapacity={bleSignal?.queueCapacity}
           rssiThreshold={bleSignal?.rssiThreshold}
-          tagMac={bleSignal?.tagMac}        // passed from useAssetPolling
+          tagMac={bleSignal?.tagMac}
           tagName={bleSignal?.tagName}
         />
       </div>
     </div>
   );
-}
+}

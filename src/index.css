@@ -643,3 +643,334 @@ html, body {
     border-radius: 14px !important;
   }
 }
+
+/* ============================================================
+   2D / 3D View Mode Switcher (Header & Floating)
+   ============================================================ */
+.view-mode-switcher {
+  display: flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.view-mode-btn {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.view-mode-btn:hover {
+  color: #1e293b;
+}
+
+.view-mode-btn.active {
+  background: #ffffff;
+  color: #0085ff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================
+   3D Calibration Panel Overlay
+   ============================================================ */
+.calib-toggle-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 25;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+}
+
+.calib-toggle-btn:hover {
+  background: #ffffff;
+  border-color: #0085ff;
+  color: #0085ff;
+  transform: translateY(-1px);
+}
+
+.calib-overlay-card {
+  position: absolute;
+  top: 60px;
+  left: 16px;
+  z-index: 30;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100% - 80px);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  color: #f8fafc;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: calibSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes calibSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.calib-header {
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calib-header-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calib-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #0085ff;
+  color: #ffffff;
+}
+
+.calib-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calib-close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Tabs */
+.calib-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.calib-tab-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  padding: 8px 4px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+}
+
+.calib-tab-btn:hover {
+  color: #e2e8f0;
+}
+
+.calib-tab-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #38bdf8;
+}
+
+/* Body Content */
+.calib-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 420px;
+}
+
+.calib-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.calib-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.calib-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calib-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.calib-field-unit {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.calib-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calib-number-input {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #38bdf8;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.calib-number-input:focus {
+  border-color: #0085ff;
+  box-shadow: 0 0 0 2px rgba(0, 133, 255, 0.3);
+  color: #ffffff;
+}
+
+/* Step Adjuster Pills */
+.calib-step-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.calib-step-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.calib-step-btn:hover {
+  background: rgba(0, 133, 255, 0.25);
+  border-color: rgba(0, 133, 255, 0.5);
+  color: #ffffff;
+}
+
+.calib-step-btn:active {
+  transform: scale(0.95);
+}
+
+/* Footer Actions */
+.calib-footer {
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calib-action-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.calib-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.calib-action-btn--primary {
+  background: #0085ff;
+  border-color: #0085ff;
+  color: #ffffff;
+}
+
+.calib-action-btn--primary:hover {
+  background: #0070df;
+  border-color: #0070df;
+}
+

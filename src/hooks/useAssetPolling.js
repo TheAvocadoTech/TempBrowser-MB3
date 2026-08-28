@@ -14,53 +14,81 @@ export const useAssetPolling = (interval = 5000) => {
       try {
         const result = await getAllAssets();
 
-        if (isMounted && result && result.assets) {
-          const assetArray = Object.entries(result.assets).map(([mac, data]) => ({
-            mac,
-            device_name: data.device_name,
-            position: data.position,
-            position_px: data.position_px,
-            ap_mac: data.ap_mac,
-            beam: data.beam,
-            rssi: data.rssi,
-            raw_rssi: data.raw_rssi,
-            best_rssi: data.best_rssi,
-            stability: data.stability,
-            is_stable: data.is_stable,
-            lastUpdate: data.lastUpdate,
-            map_id: data.map_id,
-            apHistory: data.apHistory || [],
-          }));
-
-          dispatch(setAssets(assetArray));
-
-          if (assetArray.length > 0) {
-            // Pick the asset with the strongest RSSI (or you could pick a specific one)
-            const primaryAsset = assetArray.reduce((best, current) =>
-              (current.rssi || -Infinity) > (best.rssi || -Infinity) ? current : best
-            , assetArray[0]);
-
-            dispatch(updateLiveLocation({
-              bleSignal: {
-                rssi: primaryAsset.rssi,
-                raw_rssi: primaryAsset.raw_rssi,
-                beam: primaryAsset.beam,
-                ap_mac: primaryAsset.ap_mac,
-                last_seen: primaryAsset.lastUpdate
-                  ? Math.floor(primaryAsset.lastUpdate / 1000)
-                  : null,
-                x: primaryAsset.position_px?.x,
-                y: primaryAsset.position_px?.y,
-                x_m: primaryAsset.position?.x_m,
-                y_m: primaryAsset.position?.y_m,
-                queueSize: assetArray.length,
-                queueCapacity: 80,
-                rssiThreshold: -60,
-                // NEW: pass tag identity
-                tagMac: primaryAsset.mac,
-                tagName: primaryAsset.device_name,
-              }
+        if (isMounted && result) {
+          let rawList = [];
+          if (Array.isArray(result.data)) {
+            rawList = result.data;
+          } else if (Array.isArray(result)) {
+            rawList = result;
+          } else if (result.assets && typeof result.assets === "object") {
+            rawList = Object.entries(result.assets).map(([mac, data]) => ({
+              mac,
+              ...data,
             }));
+          }
+
+          if (rawList.length > 0) {
+            const assetArray = rawList.map((data) => {
+              const rawData = data.raw || data;
+              return {
+                mac: data.mac || rawData.mac,
+                device_name: data.device_name || rawData.name || rawData.device_name || "Asset",
+                position: data.position || {
+                  x_m: data.x_m,
+                  y_m: data.y_m,
+                },
+                position_px: data.position_px || {
+                  x: rawData.x || data.x,
+                  y: rawData.y || data.y,
+                },
+                ap_mac: data.ap_mac || rawData.ap_mac,
+                beam: data.beam !== undefined ? data.beam : rawData.beam,
+                rssi: data.rssi !== undefined ? data.rssi : rawData.rssi,
+                raw_rssi: data.raw_rssi || rawData.rssi,
+                best_rssi: data.best_rssi || data.rssi || rawData.rssi,
+                stability: data.stability !== undefined ? data.stability : 1.0,
+                is_stable: data.is_stable !== undefined ? data.is_stable : true,
+                lastUpdate: data.lastUpdate || rawData.last_seen || Date.now(),
+                map_id: data.map_id || rawData.map_id,
+                apHistory: data.apHistory || [],
+              };
+            });
+
+            dispatch(setAssets(assetArray));
+
+            // Pick the asset with the strongest RSSI
+            const primaryAsset = assetArray.reduce(
+              (best, current) =>
+                (current.rssi || -Infinity) > (best.rssi || -Infinity)
+                  ? current
+                  : best,
+              assetArray[0]
+            );
+
+            if (primaryAsset) {
+              dispatch(
+                updateLiveLocation({
+                  bleSignal: {
+                    rssi: primaryAsset.rssi,
+                    raw_rssi: primaryAsset.raw_rssi,
+                    beam: primaryAsset.beam,
+                    ap_mac: primaryAsset.ap_mac,
+                    last_seen: primaryAsset.lastUpdate
+                      ? Math.floor(primaryAsset.lastUpdate / 1000)
+                      : null,
+                    x: primaryAsset.position_px?.x,
+                    y: primaryAsset.position_px?.y,
+                    x_m: primaryAsset.position?.x_m,
+                    y_m: primaryAsset.position?.y_m,
+                    queueSize: assetArray.length,
+                    queueCapacity: 8,
+                    rssiThreshold: -60,
+                    tagMac: primaryAsset.mac,
+                    tagName: primaryAsset.device_name,
+                  },
+                })
+              );
+            }
           }
         }
       } catch (error) {
