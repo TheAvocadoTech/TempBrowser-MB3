@@ -223,6 +223,7 @@ const SVG_HEIGHT = 600;
 
 export default function MapView2D({
   floor,
+  tagFloor = "GR",
   onFloorChange,
   mapDetails,
   bleLocation,
@@ -351,7 +352,56 @@ export default function MapView2D({
     [mapWidth, mapHeight],
   );
 
+  const isLiveFloor = floor === tagFloor;
+
+  // Resolve lift coordinates for GR (midpoint of N12 & N7)
+  const grLiftPos = useMemo(() => {
+    const grWf = floorMapData?.GR?.wayfindingData || (floor === "GR" ? activeWayfinding : null);
+    const grNodes = grWf?.nodes || [];
+    const n12 = findWayfindingNode(grNodes, "12");
+    const n7 = findWayfindingNode(grNodes, "7");
+
+    if (n12 && n7) {
+      const p1 = n12.position || n12;
+      const p2 = n7.position || n7;
+      if (p1.x !== undefined && p2.x !== undefined) {
+        return {
+          x: (Number(p1.x) + Number(p2.x)) / 2,
+          y: (Number(p1.y) + Number(p2.y)) / 2,
+        };
+      }
+    }
+    return { x: 5004.59, y: 2313.4 };
+  }, [floorMapData, floor, activeWayfinding]);
+
+  // Resolve lift coordinates for F1 (midpoint of N48 & N45)
+  const f1LiftPos = useMemo(() => {
+    const f1Wf = floorMapData?.F1?.wayfindingData || (floor === "F1" ? activeWayfinding : null);
+    const f1Nodes = f1Wf?.nodes || [];
+    const n48 = findWayfindingNode(f1Nodes, "48");
+    const n45 = findWayfindingNode(f1Nodes, "45");
+
+    if (n48 && n45) {
+      const p1 = n48.position || n48;
+      const p2 = n45.position || n45;
+      if (p1.x !== undefined && p2.x !== undefined) {
+        return {
+          x: (Number(p1.x) + Number(p2.x)) / 2,
+          y: (Number(p1.y) + Number(p2.y)) / 2,
+        };
+      }
+    }
+    return { x: 5004.59, y: 2313.4 };
+  }, [floorMapData, floor, activeWayfinding]);
+
+  const liftPos = floor === "F1" ? f1LiftPos : grLiftPos;
+
   const rawStartPos = useMemo(() => {
+    // If viewing F1 while tag is in GR, navigation starts from the F1 Lift (between N48 and N45)
+    if (!isLiveFloor && floor === "F1") {
+      return f1LiftPos;
+    }
+
     let rawX = bleLocation?.x;
     let rawY = bleLocation?.y;
 
@@ -362,35 +412,22 @@ export default function MapView2D({
       rawY = bleLocation.y_m * ppm;
     }
 
-    if (rawX == null || isNaN(rawX)) rawX = 5004.59;
-    if (rawY == null || isNaN(rawY)) rawY = 2313.4;
+    if (rawX == null || isNaN(rawX)) rawX = liftPos.x;
+    if (rawY == null || isNaN(rawY)) rawY = liftPos.y;
 
     return { x: rawX, y: rawY };
-  }, [bleLocation, ppm]);
+  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos]);
 
   const effectiveTargetPos = useMemo(() => {
     if (floor === "GR") {
-      const nodes = activeWayfinding?.nodes || [];
-      const n12 = findWayfindingNode(nodes, "12");
-      const n7 = findWayfindingNode(nodes, "7");
-
-      if (n12 && n7) {
-        const p1 = n12.position || n12;
-        const p2 = n7.position || n7;
-        if (p1.x !== undefined && p2.x !== undefined) {
-          return {
-            x: (Number(p1.x) + Number(p2.x)) / 2,
-            y: (Number(p1.y) + Number(p2.y)) / 2,
-          };
-        }
-      }
+      return grLiftPos;
     }
 
     if (targetPos && targetPos.x !== undefined && targetPos.y !== undefined) {
       return targetPos;
     }
-    return null;
-  }, [floor, activeWayfinding, targetPos]);
+    return { x: 5525.298750495607, y: 2491.837930104785 };
+  }, [floor, grLiftPos, targetPos]);
 
   const hasValidTarget = useMemo(() => {
     return (
@@ -408,7 +445,7 @@ export default function MapView2D({
   }, [hasValidTarget, effectiveTargetPos, transformCoords]);
 
   const backendWaypoints = useMemo(() => {
-    if (floor === "GR" && effectiveTargetPos) {
+    if (floor === "GR") {
       return calculateDijkstraPath(
         activeWayfinding?.nodes || [],
         activeWayfinding?.edges || {},
@@ -416,6 +453,18 @@ export default function MapView2D({
         effectiveTargetPos,
       );
     }
+
+    // On F1: if not on live floor (previewing from GR), route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
+    if (floor === "F1" && !isLiveFloor) {
+      return calculateDijkstraPath(
+        activeWayfinding?.nodes || [],
+        activeWayfinding?.edges || {},
+        f1LiftPos,
+        effectiveTargetPos,
+      );
+    }
+
+    // On F1 and live floor
     const rawWaypoints =
       activeRoute?.waypoints || activeRoute?.nodes || activeRoute?.path;
     const extracted = extractWaypoints(rawWaypoints);
@@ -428,7 +477,7 @@ export default function MapView2D({
       );
     }
     return extracted;
-  }, [floor, effectiveTargetPos, activeWayfinding, rawStartPos, activeRoute]);
+  }, [floor, isLiveFloor, f1LiftPos, effectiveTargetPos, activeWayfinding, rawStartPos, activeRoute]);
 
   // Snap start position to nearest corridor wayfinding segment
   const startPos = useMemo(() => {
@@ -474,6 +523,8 @@ export default function MapView2D({
 
   const forwardWaypoints = useMemo(() => {
     if (backendWaypoints.length === 0) return [];
+    if (!isLiveFloor) return backendWaypoints;
+
     // Find closest waypoint ahead of startPos
     let closestIdx = 0;
     let minDist = Infinity;
@@ -485,7 +536,19 @@ export default function MapView2D({
       }
     });
     return backendWaypoints.slice(closestIdx);
-  }, [backendWaypoints, rawStartPos]);
+  }, [backendWaypoints, rawStartPos, isLiveFloor]);
+
+  const previewDistanceInMeters = useMemo(() => {
+    if (backendWaypoints.length < 2) return null;
+    let totalPx = 0;
+    for (let i = 0; i < backendWaypoints.length - 1; i++) {
+      totalPx += Math.hypot(
+        backendWaypoints[i + 1].x - backendWaypoints[i].x,
+        backendWaypoints[i + 1].y - backendWaypoints[i].y,
+      );
+    }
+    return (totalPx / ppm).toFixed(1);
+  }, [backendWaypoints, ppm]);
 
   const liveRoutePathD = useMemo(() => {
     if (!destPos && forwardWaypoints.length === 0) return "";
@@ -543,12 +606,18 @@ export default function MapView2D({
         <span className="nav-icon-dot"></span>
         <div className="nav-badge-texts">
           <span className="nav-badge-title">
-            {proximity || "Live Tracking Active"}
+            {isLiveFloor
+              ? (proximity || "Live Tracking Active")
+              : (floor === "F1" ? "F1 Route Preview" : "Route Preview")}
           </span>
           <span className="nav-badge-subtitle">
-            {distanceInMeters !== null
-              ? `${distanceInMeters} m to Target`
-              : "Updating Location..."}
+            {isLiveFloor
+              ? (distanceInMeters !== null
+                  ? `${distanceInMeters} m to Target`
+                  : "Updating Location...")
+              : (previewDistanceInMeters !== null
+                  ? `${previewDistanceInMeters} m from Lift to Cabinet`
+                  : "Path from Lift to Cabinet")}
           </span>
         </div>
       </div>
@@ -761,8 +830,8 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* ---- MARKERS ---- */}
-        {startPos && (
+        {/* ---- VISITOR LIVE MARKER (Rendered ONLY on the visitor's current live floor) ---- */}
+        {isLiveFloor && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
             {/* Outer Pulsing Aura */}
             <circle
@@ -799,6 +868,34 @@ export default function MapView2D({
                 />
               </g>
             )}
+          </g>
+        )}
+
+        {/* ---- LIFT START PIN (When previewing F1 from GR) ---- */}
+        {!isLiveFloor && floor === "F1" && startPos && (
+          <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
+            <circle
+              r="12"
+              fill="#0284c7"
+              opacity="0.25"
+              className="ble-pulse-aura"
+            />
+            <circle r="7" fill="#0284c7" stroke="#ffffff" strokeWidth="1.5" />
+            <text
+              x="0"
+              y="-12"
+              fill="#0369a1"
+              fontSize="9"
+              fontWeight="800"
+              textAnchor="middle"
+              style={{
+                paintOrder: "stroke",
+                stroke: "#ffffff",
+                strokeWidth: "2px",
+              }}
+            >
+              LIFT
+            </text>
           </g>
         )}
 

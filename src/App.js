@@ -5,6 +5,7 @@ import {
   setFloorMapDetails,
   updateLiveLocation,
   selectBleSignal,
+  selectTagFloor,
 } from "./store/floorSlice";
 import Header from "./components/Header";
 import MapView2D from "./components/MapView2D";
@@ -24,6 +25,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState("2D"); // '2D' | '3D'
 
   const activeFloor = useSelector((state) => state.floor.activeFloor);
+  const tagFloor = useSelector(selectTagFloor);
   const visitorPos = useSelector((state) => state.floor.visitorPos);
   const targetPos = useSelector((state) => state.floor.targetPos);
   const mapMeta = useSelector((state) => state.floor.mapMeta);
@@ -187,6 +189,7 @@ export default function App() {
           {viewMode === "3D" ? (
             <MapView3D
               floor={activeFloor}
+              tagFloor={tagFloor}
               onFloorChange={handleFloorChange}
               mapDetails={mapMeta}
               bleLocation={visitorPos}
@@ -201,6 +204,7 @@ export default function App() {
           ) : (
             <MapView2D
               floor={activeFloor}
+              tagFloor={tagFloor}
               onFloorChange={handleFloorChange}
               mapDetails={mapMeta}
               bleLocation={visitorPos}

@@ -98,6 +98,8 @@ export const getVisitorLocation = async (visitorId = "current") => {
       const urlParams = new URLSearchParams(window.location.search);
       const urlVisitorId = urlParams.get("visitorId") || urlParams.get("id");
       const urlToken = urlParams.get("token") || urlParams.get("qr");
+      const urlMac = urlParams.get("mac") || urlParams.get("tagMac");
+      const urlTag = urlParams.get("tag") || urlParams.get("tagId");
 
       if (urlVisitorId) {
         targetId = urlVisitorId;
@@ -106,6 +108,17 @@ export const getVisitorLocation = async (visitorId = "current") => {
         if (tokenRes && (tokenRes.data || tokenRes.id)) {
           const vData = tokenRes.data || tokenRes;
           targetId = vData._id || vData.id;
+        }
+      } else if (urlMac || urlTag) {
+        const visitorsRes = await getAllVisitors();
+        const vList = visitorsRes?.data || (Array.isArray(visitorsRes) ? visitorsRes : []);
+        const match = vList.find(
+          (v) =>
+            (urlMac && (v.tagMac?.toLowerCase() === urlMac.toLowerCase() || v.mistMacAddress?.toLowerCase() === urlMac.toLowerCase())) ||
+            (urlTag && (v.tagNickname?.toLowerCase() === urlTag.toLowerCase() || v.idNumber?.toLowerCase() === urlTag.toLowerCase() || v.tagId?._id === urlTag))
+        );
+        if (match) {
+          targetId = match._id || match.id;
         }
       }
     }

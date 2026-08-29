@@ -318,6 +318,7 @@ function calculateDijkstraPath(nodesList, edgesMap, startPos, endPos) {
 
 export default function MapView3D({
   floor = "GR",
+  tagFloor = "GR",
   onFloorChange,
   mapDetails,
   bleLocation,
@@ -367,6 +368,8 @@ export default function MapView3D({
   const heightMeters = mapDetails?.height_m || 102.25;
   const ppm = mapDetails?.ppm || 50.07391564392213;
 
+  const isLiveFloor = floor === tagFloor;
+
   // Coordinate mapper from 2D pixel space to 3D world space centered at (0, 0, 0)
   const mapTo3D = useCallback(
     (pixelX, pixelY, heightY = 0.0) => {
@@ -379,9 +382,6 @@ export default function MapView3D({
     [ppm, widthMeters, heightMeters],
   );
 
-  // Resolve effective target coordinates based on active floor:
-  // On GR floor: target is the midpoint between N12 and N17
-  // On F1 floor: target is the destination coordinate (targetPos)
   const activeFloorWf = floorMapData?.[floor]?.wayfindingData || wayfindingData;
   const activeFloorNodes =
     activeFloorWf?.nodes ||
@@ -405,29 +405,66 @@ export default function MapView3D({
     activeFloorEdges = extracted;
   }
 
+  // Resolve lift coordinates for GR (midpoint of N12 & N7)
+  const grLiftPos = useMemo(() => {
+    const grWf = floorMapData?.GR?.wayfindingData || (floor === "GR" ? wayfindingData : null);
+    const grNodes =
+      grWf?.nodes ||
+      grWf?.wayfinding_path?.nodes ||
+      grWf?.data?.nodes ||
+      [];
+    const n12 = findWayfindingNode(grNodes, "12");
+    const n7 = findWayfindingNode(grNodes, "7");
+
+    if (n12 && n7) {
+      const p1 = n12.position || n12;
+      const p2 = n7.position || n7;
+      if (p1.x !== undefined && p2.x !== undefined) {
+        return {
+          x: (Number(p1.x) + Number(p2.x)) / 2,
+          y: (Number(p1.y) + Number(p2.y)) / 2,
+        };
+      }
+    }
+    return { x: 5004.59, y: 2313.4 };
+  }, [floorMapData, floor, wayfindingData]);
+
+  // Resolve lift coordinates for F1 (midpoint of N48 & N45)
+  const f1LiftPos = useMemo(() => {
+    const f1Wf = floorMapData?.F1?.wayfindingData || (floor === "F1" ? wayfindingData : null);
+    const f1Nodes =
+      f1Wf?.nodes ||
+      f1Wf?.wayfinding_path?.nodes ||
+      f1Wf?.data?.nodes ||
+      [];
+    const n48 = findWayfindingNode(f1Nodes, "48");
+    const n45 = findWayfindingNode(f1Nodes, "45");
+
+    if (n48 && n45) {
+      const p1 = n48.position || n48;
+      const p2 = n45.position || n45;
+      if (p1.x !== undefined && p2.x !== undefined) {
+        return {
+          x: (Number(p1.x) + Number(p2.x)) / 2,
+          y: (Number(p1.y) + Number(p2.y)) / 2,
+        };
+      }
+    }
+    return { x: 5004.59, y: 2313.4 };
+  }, [floorMapData, floor, wayfindingData]);
+
+  const liftPos = floor === "F1" ? f1LiftPos : grLiftPos;
+
   const resolvedTargetPos = useMemo(() => {
     if (floor === "GR") {
-      const n12 = findWayfindingNode(activeFloorNodes, "12");
-      const n7 = findWayfindingNode(activeFloorNodes, "7");
-
-      if (n12 && n7) {
-        const p1 = n12.position || n12;
-        const p2 = n7.position || n7;
-        if (p1.x !== undefined && p2.x !== undefined) {
-          return {
-            x: (Number(p1.x) + Number(p2.x)) / 2,
-            y: (Number(p1.y) + Number(p2.y)) / 2,
-            isComputedMidpoint: true,
-          };
-        }
-      }
+      return grLiftPos;
     }
 
     if (targetPos && targetPos.x !== undefined && targetPos.y !== undefined) {
       return targetPos;
     }
-    return null;
-  }, [floor, activeFloorNodes, targetPos]);
+    return { x: 5525.298750495607, y: 2491.837930104785 };
+  }, [floor, grLiftPos, targetPos]);
 
   // Save calibration changes to localStorage
   const updateCalibrationField = useCallback(
@@ -792,19 +829,24 @@ export default function MapView3D({
       markersGroup.remove(markersGroup.children[0]);
     }
 
-    // 1. Resolve raw BLE coordinates
+    // 1. Resolve raw BLE coordinates or Lift start coordinates
     let bleX = bleLocation?.x;
     let bleY = bleLocation?.y;
 
-    if (bleLocation?.x_m != null && (bleX == null || bleX < 300)) {
-      bleX = bleLocation.x_m * ppm;
-    }
-    if (bleLocation?.y_m != null && (bleY == null || bleY < 300)) {
-      bleY = bleLocation.y_m * ppm;
-    }
+    if (!isLiveFloor && floor === "F1") {
+      bleX = liftPos.x;
+      bleY = liftPos.y;
+    } else {
+      if (bleLocation?.x_m != null && (bleX == null || bleX < 300)) {
+        bleX = bleLocation.x_m * ppm;
+      }
+      if (bleLocation?.y_m != null && (bleY == null || bleY < 300)) {
+        bleY = bleLocation.y_m * ppm;
+      }
 
-    if (bleX == null || isNaN(bleX)) bleX = 5004.59;
-    if (bleY == null || isNaN(bleY)) bleY = 2313.4;
+      if (bleX == null || isNaN(bleX)) bleX = liftPos.x;
+      if (bleY == null || isNaN(bleY)) bleY = liftPos.y;
+    }
 
     const rawBlePosGround = mapTo3D(bleX, bleY, 0.0);
 
@@ -815,6 +857,14 @@ export default function MapView3D({
         activeFloorNodes,
         activeFloorEdges,
         { x: bleX, y: bleY },
+        resolvedTargetPos,
+      );
+    } else if (floor === "F1" && !isLiveFloor) {
+      // Previewing F1 from GR: Route from F1 Lift -> Cabinet
+      rawRouteWaypoints = calculateDijkstraPath(
+        activeFloorNodes,
+        activeFloorEdges,
+        liftPos,
         resolvedTargetPos,
       );
     } else {
@@ -834,32 +884,39 @@ export default function MapView3D({
     // 2. Convert waypoints to 3D positions for corridor matching
     const waypoints3D = rawRouteWaypoints.map((pt) => mapTo3D(pt.x, pt.y, 0.0));
 
-    // 3. Snap to corridor centerline if near active route
-    const snapResult = snapToCorridor(rawBlePosGround, waypoints3D, 2.8);
-    const activeBlePos3D = {
-      x: snapResult.x,
-      z: snapResult.z,
-    };
-
-    // Update target LERP reference
-    targetPosRef.current.x = activeBlePos3D.x;
-    targetPosRef.current.z = activeBlePos3D.z;
-
-    // 4. Dynamic Forward Path Trimming
+    // 3. Snap to corridor centerline if near active route on live floor
+    let activeBlePos3D = rawBlePosGround;
     let forwardWaypoints3D = waypoints3D;
-    if (snapResult.isSnapped && snapResult.segmentIndex >= 0) {
-      forwardWaypoints3D = waypoints3D.slice(snapResult.segmentIndex + 1);
-    } else if (waypoints3D.length > 0) {
-      let closestIdx = 0;
-      let minDist = Infinity;
-      waypoints3D.forEach((wpt, idx) => {
-        const d = Math.hypot(wpt.x - activeBlePos3D.x, wpt.z - activeBlePos3D.z);
-        if (d < minDist) {
-          minDist = d;
-          closestIdx = idx;
-        }
-      });
-      forwardWaypoints3D = waypoints3D.slice(closestIdx);
+
+    if (isLiveFloor) {
+      const snapResult = snapToCorridor(rawBlePosGround, waypoints3D, 2.8);
+      activeBlePos3D = {
+        x: snapResult.x,
+        z: snapResult.z,
+      };
+
+      // Update target LERP reference
+      targetPosRef.current.x = activeBlePos3D.x;
+      targetPosRef.current.z = activeBlePos3D.z;
+
+      // Dynamic Forward Path Trimming for live navigation
+      if (snapResult.isSnapped && snapResult.segmentIndex >= 0) {
+        forwardWaypoints3D = waypoints3D.slice(snapResult.segmentIndex + 1);
+      } else if (waypoints3D.length > 0) {
+        let closestIdx = 0;
+        let minDist = Infinity;
+        waypoints3D.forEach((wpt, idx) => {
+          const d = Math.hypot(wpt.x - activeBlePos3D.x, wpt.z - activeBlePos3D.z);
+          if (d < minDist) {
+            minDist = d;
+            closestIdx = idx;
+          }
+        });
+        forwardWaypoints3D = waypoints3D.slice(closestIdx);
+      }
+    } else {
+      // For preview mode, show full path
+      forwardWaypoints3D = waypoints3D;
     }
 
     // 5. Determine target orientation for live arrow
@@ -890,7 +947,7 @@ export default function MapView3D({
       resolvedTargetPos.x !== undefined &&
       resolvedTargetPos.y !== undefined;
 
-    // Precise physical distance from live position to destination in meters
+    // Precise physical distance from position to destination in meters
     const distToTargetMeters = hasValidTarget
       ? Math.hypot(
           (resolvedTargetPos.x - bleX) / ppm,
@@ -898,7 +955,16 @@ export default function MapView3D({
         )
       : (distance ? Number(distance) : null);
 
-    if (!hasValidTarget && forwardWaypoints3D.length === 0) {
+    if (!isLiveFloor) {
+      // Preview Mode instructions
+      setTurnInstruction({
+        type: "straight",
+        text: floor === "F1" ? "F1 Route: Lift to Cabinet" : "Route Preview",
+        subtext: distToTargetMeters
+          ? `${distToTargetMeters.toFixed(1)}m total • Take lift to ${floor}`
+          : `Take lift to ${floor} to begin navigation`,
+      });
+    } else if (!hasValidTarget && forwardWaypoints3D.length === 0) {
       setTurnInstruction({
         type: "searching",
         text: "Live Tracking Active",
@@ -925,31 +991,45 @@ export default function MapView3D({
       const v2x = p2.x - p1.x;
       const v2z = p2.z - p1.z;
 
-      const angle1 = Math.atan2(v1x, v1z);
-      const angle2 = Math.atan2(v2x, v2z);
-      let turnAngle = ((angle2 - angle1) * 180) / Math.PI;
-      while (turnAngle < -180) turnAngle += 360;
-      while (turnAngle > 180) turnAngle -= 360;
+      // Unambiguous relative turn angle calculation using cross and dot products
+      const cross = v1x * v2z - v1z * v2x;
+      const dot = v1x * v2x + v1z * v2z;
+      const turnAngle = (Math.atan2(cross, dot) * 180) / Math.PI;
 
       const distToTurn = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+      const roundedDist = Math.max(1, Math.round(distToTurn));
 
-      if (turnAngle > 35) {
+      if (distToTurn <= 1.5 && Math.abs(turnAngle) > 25) {
+        if (turnAngle > 25) {
+          setTurnInstruction({
+            type: "turn-right",
+            text: "Turn Right Now",
+            subtext: "Follow corridor towards destination",
+          });
+        } else {
+          setTurnInstruction({
+            type: "turn-left",
+            text: "Turn Left Now",
+            subtext: "Follow corridor towards destination",
+          });
+        }
+      } else if (turnAngle > 25) {
         setTurnInstruction({
           type: "turn-right",
-          text: `In ${distToTurn.toFixed(0)}m, Turn Right`,
-          subtext: `Follow corridor toward destination`,
+          text: `In ${roundedDist}m, Turn Right`,
+          subtext: "Follow corridor toward destination",
         });
-      } else if (turnAngle < -35) {
+      } else if (turnAngle < -25) {
         setTurnInstruction({
           type: "turn-left",
-          text: `In ${distToTurn.toFixed(0)}m, Turn Left`,
-          subtext: `Follow corridor toward destination`,
+          text: `In ${roundedDist}m, Turn Left`,
+          subtext: "Follow corridor toward destination",
         });
       } else {
         setTurnInstruction({
           type: "straight",
-          text: `Continue Straight for ${distToTurn.toFixed(0)}m`,
-          subtext: `Along corridor path`,
+          text: `Continue Straight for ${roundedDist}m`,
+          subtext: "Along corridor path",
         });
       }
     } else if (hasValidTarget) {
@@ -962,140 +1042,180 @@ export default function MapView3D({
       });
     }
 
-    // 6. Create 3D Live Arrow Group
-    const liveArrowGroup = new THREE.Group();
-    liveArrowGroup.position.set(activeBlePos3D.x, 0.0, activeBlePos3D.z);
-    liveArrowGroup.rotation.y = targetHeadingRef.current;
-    liveArrowGroupRef.current = liveArrowGroup;
+    // 6. Create 3D Live Arrow Group (Only on Live Floor)
+    if (isLiveFloor) {
+      const liveArrowGroup = new THREE.Group();
+      liveArrowGroup.position.set(activeBlePos3D.x, 0.0, activeBlePos3D.z);
+      liveArrowGroup.rotation.y = targetHeadingRef.current;
+      liveArrowGroupRef.current = liveArrowGroup;
 
-    // 6a. Google Maps 3D Chevron Arrow (Main Blue Body)
-    const arrowShape = new THREE.Shape();
-    arrowShape.moveTo(0, 1.2);
-    arrowShape.lineTo(-0.6, -0.5);
-    arrowShape.lineTo(-0.25, -0.2);
-    arrowShape.lineTo(0, -0.5);
-    arrowShape.lineTo(0.25, -0.2);
-    arrowShape.lineTo(0.6, -0.5);
-    arrowShape.closePath();
+      // 6a. Google Maps 3D Chevron Arrow (Main Blue Body)
+      const arrowShape = new THREE.Shape();
+      arrowShape.moveTo(0, 1.2);
+      arrowShape.lineTo(-0.6, -0.5);
+      arrowShape.lineTo(-0.25, -0.2);
+      arrowShape.lineTo(0, -0.5);
+      arrowShape.lineTo(0.25, -0.2);
+      arrowShape.lineTo(0.6, -0.5);
+      arrowShape.closePath();
 
-    const arrowExtrudeSettings = {
-      depth: 0.25,
-      bevelEnabled: true,
-      bevelThickness: 0.05,
-      bevelSize: 0.05,
-      bevelSegments: 3,
-    };
-    const arrowGeom = new THREE.ExtrudeGeometry(
-      arrowShape,
-      arrowExtrudeSettings
-    );
-    arrowGeom.rotateX(Math.PI / 2);
+      const arrowExtrudeSettings = {
+        depth: 0.25,
+        bevelEnabled: true,
+        bevelThickness: 0.05,
+        bevelSize: 0.05,
+        bevelSegments: 3,
+      };
+      const arrowGeom = new THREE.ExtrudeGeometry(
+        arrowShape,
+        arrowExtrudeSettings
+      );
+      arrowGeom.rotateX(Math.PI / 2);
 
-    const arrowMat = new THREE.MeshStandardMaterial({
-      color: 0x0085ff,
-      emissive: 0x0066ff,
-      emissiveIntensity: 0.85,
-      roughness: 0.2,
-      metalness: 0.3,
-    });
-    const arrowMesh = new THREE.Mesh(arrowGeom, arrowMat);
-    arrowMesh.position.y = 0.35;
-    liveArrowGroup.add(arrowMesh);
+      const arrowMat = new THREE.MeshStandardMaterial({
+        color: 0x0085ff,
+        emissive: 0x0066ff,
+        emissiveIntensity: 0.85,
+        roughness: 0.2,
+        metalness: 0.3,
+      });
+      const arrowMesh = new THREE.Mesh(arrowGeom, arrowMat);
+      arrowMesh.position.y = 0.35;
+      liveArrowGroup.add(arrowMesh);
 
-    // 6b. Inner White Chevron Accent
-    const innerShape = new THREE.Shape();
-    innerShape.moveTo(0, 1.0);
-    innerShape.lineTo(-0.4, -0.3);
-    innerShape.lineTo(-0.15, -0.1);
-    innerShape.lineTo(0, -0.3);
-    innerShape.lineTo(0.15, -0.1);
-    innerShape.lineTo(0.4, -0.3);
-    innerShape.closePath();
-    const innerGeom = new THREE.ExtrudeGeometry(innerShape, {
-      depth: 0.27,
-      bevelEnabled: false,
-    });
-    innerGeom.rotateX(Math.PI / 2);
-    const innerMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.8,
-    });
-    const innerMesh = new THREE.Mesh(innerGeom, innerMat);
-    innerMesh.position.y = 0.35;
-    liveArrowGroup.add(innerMesh);
+      // 6b. Inner White Chevron Accent
+      const innerShape = new THREE.Shape();
+      innerShape.moveTo(0, 1.0);
+      innerShape.lineTo(-0.4, -0.3);
+      innerShape.lineTo(-0.15, -0.1);
+      innerShape.lineTo(0, -0.3);
+      innerShape.lineTo(0.15, -0.1);
+      innerShape.lineTo(0.4, -0.3);
+      innerShape.closePath();
+      const innerGeom = new THREE.ExtrudeGeometry(innerShape, {
+        depth: 0.27,
+        bevelEnabled: false,
+      });
+      innerGeom.rotateX(Math.PI / 2);
+      const innerMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.8,
+      });
+      const innerMesh = new THREE.Mesh(innerGeom, innerMat);
+      innerMesh.position.y = 0.35;
+      liveArrowGroup.add(innerMesh);
 
-    // 6c. Vision Field Cone
-    const beamShape = new THREE.Shape();
-    beamShape.moveTo(0, 0.2);
-    beamShape.lineTo(-1.2, 3.2);
-    beamShape.lineTo(1.2, 3.2);
-    beamShape.closePath();
-    const beamGeom = new THREE.ShapeGeometry(beamShape);
-    beamGeom.rotateX(Math.PI / 2);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.3,
-      side: THREE.DoubleSide,
-    });
-    const beamMesh = new THREE.Mesh(beamGeom, beamMat);
-    beamMesh.position.y = 0.06;
-    beamMesh.userData = { isLiveBeam: true };
-    liveArrowGroup.add(beamMesh);
+      // 6c. Vision Field Cone
+      const beamShape = new THREE.Shape();
+      beamShape.moveTo(0, 0.2);
+      beamShape.lineTo(-1.2, 3.2);
+      beamShape.lineTo(1.2, 3.2);
+      beamShape.closePath();
+      const beamGeom = new THREE.ShapeGeometry(beamShape);
+      beamGeom.rotateX(Math.PI / 2);
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+      });
+      const beamMesh = new THREE.Mesh(beamGeom, beamMat);
+      beamMesh.position.y = 0.06;
+      beamMesh.userData = { isLiveBeam: true };
+      liveArrowGroup.add(beamMesh);
 
-    // 6d. Ground Disc & Pulsing Halo
-    const discGeom = new THREE.CircleGeometry(0.8, 32);
-    const discMat = new THREE.MeshBasicMaterial({
-      color: 0x0085ff,
-      transparent: true,
-      opacity: 0.35,
-      side: THREE.DoubleSide,
-    });
-    const discMesh = new THREE.Mesh(discGeom, discMat);
-    discMesh.rotation.x = -Math.PI / 2;
-    discMesh.position.y = 0.04;
-    liveArrowGroup.add(discMesh);
+      // 6d. Ground Disc & Pulsing Halo
+      const discGeom = new THREE.CircleGeometry(0.8, 32);
+      const discMat = new THREE.MeshBasicMaterial({
+        color: 0x0085ff,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+      });
+      const discMesh = new THREE.Mesh(discGeom, discMat);
+      discMesh.rotation.x = -Math.PI / 2;
+      discMesh.position.y = 0.04;
+      liveArrowGroup.add(discMesh);
 
-    const pulseRingGeom = new THREE.RingGeometry(0.9, 1.6, 32);
-    const pulseRingMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.35,
-      side: THREE.DoubleSide,
-    });
-    const pulseRingMesh = new THREE.Mesh(pulseRingGeom, pulseRingMat);
-    pulseRingMesh.rotation.x = -Math.PI / 2;
-    pulseRingMesh.position.y = 0.05;
-    pulseRingMesh.userData = { isLivePulse: true };
-    liveArrowGroup.add(pulseRingMesh);
+      const pulseRingGeom = new THREE.RingGeometry(0.9, 1.6, 32);
+      const pulseRingMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+      });
+      const pulseRingMesh = new THREE.Mesh(pulseRingGeom, pulseRingMat);
+      pulseRingMesh.rotation.x = -Math.PI / 2;
+      pulseRingMesh.position.y = 0.05;
+      pulseRingMesh.userData = { isLivePulse: true };
+      liveArrowGroup.add(pulseRingMesh);
 
-    // 6e. Vertical subtle beacon sphere
-    const topSphereGeom = new THREE.SphereGeometry(0.35, 32, 32);
-    const topSphereMat = new THREE.MeshStandardMaterial({
-      color: 0x0085ff,
-      emissive: 0x0085ff,
-      emissiveIntensity: 1.2,
-      transparent: true,
-      opacity: 0.85,
-    });
-    const topSphereMesh = new THREE.Mesh(topSphereGeom, topSphereMat);
-    topSphereMesh.position.y = 2.2;
-    liveArrowGroup.add(topSphereMesh);
+      // 6e. Vertical subtle beacon sphere
+      const topSphereGeom = new THREE.SphereGeometry(0.35, 32, 32);
+      const topSphereMat = new THREE.MeshStandardMaterial({
+        color: 0x0085ff,
+        emissive: 0x0085ff,
+        emissiveIntensity: 1.2,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const topSphereMesh = new THREE.Mesh(topSphereGeom, topSphereMat);
+      topSphereMesh.position.y = 2.2;
+      liveArrowGroup.add(topSphereMesh);
 
-    const lineGeom = new THREE.CylinderGeometry(0.04, 0.04, 1.8, 12);
-    const lineMat = new THREE.MeshStandardMaterial({
-      color: 0x0085ff,
-      emissive: 0x0085ff,
-      emissiveIntensity: 1.0,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const lineMesh = new THREE.Mesh(lineGeom, lineMat);
-    lineMesh.position.y = 1.3;
-    liveArrowGroup.add(lineMesh);
+      const lineGeom = new THREE.CylinderGeometry(0.04, 0.04, 1.8, 12);
+      const lineMat = new THREE.MeshStandardMaterial({
+        color: 0x0085ff,
+        emissive: 0x0085ff,
+        emissiveIntensity: 1.0,
+        transparent: true,
+        opacity: 0.6,
+      });
+      const lineMesh = new THREE.Mesh(lineGeom, lineMat);
+      lineMesh.position.y = 1.3;
+      liveArrowGroup.add(lineMesh);
 
-    markersGroup.add(liveArrowGroup);
+      markersGroup.add(liveArrowGroup);
+    } else if (floor === "F1") {
+      // 6f. Lift Start Indicator on F1 when previewing from GR
+      const lift3DPos = mapTo3D(liftPos.x, liftPos.y, 0.0);
+      const liftGroup = new THREE.Group();
+      liftGroup.position.copy(lift3DPos);
+
+      const liftBaseGeom = new THREE.CylinderGeometry(0.8, 0.8, 0.15, 32);
+      const liftBaseMat = new THREE.MeshStandardMaterial({
+        color: 0x0284c7,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.6,
+        roughness: 0.3,
+      });
+      const liftBaseMesh = new THREE.Mesh(liftBaseGeom, liftBaseMat);
+      liftBaseMesh.position.y = 0.08;
+      liftGroup.add(liftBaseMesh);
+
+      const liftPillarGeom = new THREE.CylinderGeometry(0.08, 0.08, 1.8, 16);
+      const liftPillarMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.8,
+      });
+      const liftPillarMesh = new THREE.Mesh(liftPillarGeom, liftPillarMat);
+      liftPillarMesh.position.y = 1.0;
+      liftGroup.add(liftPillarMesh);
+
+      const liftTopGeom = new THREE.SphereGeometry(0.4, 24, 24);
+      const liftTopMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 1.0,
+      });
+      const liftTopMesh = new THREE.Mesh(liftTopGeom, liftTopMat);
+      liftTopMesh.position.y = 2.0;
+      liftGroup.add(liftTopMesh);
+
+      markersGroup.add(liftGroup);
+    }
 
     // 7. Destination Marker Pin
     if (hasValidTarget) {
@@ -1318,6 +1438,9 @@ export default function MapView3D({
     bleLocation,
     resolvedTargetPos,
     floor,
+    tagFloor,
+    isLiveFloor,
+    liftPos,
     mapDetails,
     wayfindingData,
     activeRoute,

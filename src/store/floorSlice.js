@@ -3,6 +3,7 @@ import { createSlice } from "@reduxjs/toolkit";
 
 const initialState = {
   activeFloor: "GR",
+  tagFloor: "GR", // Physical floor where the visitor tag is currently located
   visitorInfo: null,
   visitorPos: null,
   targetPos: null,
@@ -248,33 +249,37 @@ export const floorSlice = createSlice({
       }
 
       // ---- MAP & TARGET ----
-      const activeFloorKey =
-        responseData.map?.id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
-        responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
+      const incomingTagFloor =
+        responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
+        responseData.map?.id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
           ? "F1"
           : "GR";
 
-      // Auto-sync activeFloor if visitor location is explicitly on a different floor
-      if (responseData.location?.map_id && state.activeFloor !== activeFloorKey) {
-        state.activeFloor = activeFloorKey;
+      // Detect if tag physically transitioned to a different floor
+      if (responseData.location?.map_id && state.tagFloor !== incomingTagFloor) {
+        state.tagFloor = incomingTagFloor;
+        // Auto-sync activeFloor when the tag physically arrives on a new floor
+        state.activeFloor = incomingTagFloor;
       }
 
       if (responseData.map) {
-        state.floorMapData[activeFloorKey].mapMeta = responseData.map;
-        if (state.activeFloor === activeFloorKey) {
+        state.floorMapData[incomingTagFloor].mapMeta = responseData.map;
+        if (state.activeFloor === incomingTagFloor) {
           state.mapMeta = responseData.map;
         }
       }
 
       // ---- WAYFINDING ----
       if (responseData.wayfinding) {
-        state.wayfindingData = responseData.wayfinding;
-        if (state.floorMapData[activeFloorKey]) {
-          state.floorMapData[activeFloorKey].wayfindingData =
+        if (state.floorMapData[incomingTagFloor]) {
+          state.floorMapData[incomingTagFloor].wayfindingData =
             responseData.wayfinding;
         }
-        if (responseData.wayfinding.route_to_destination) {
-          state.activeRoute = responseData.wayfinding.route_to_destination;
+        if (state.activeFloor === incomingTagFloor) {
+          state.wayfindingData = responseData.wayfinding;
+          if (responseData.wayfinding.route_to_destination) {
+            state.activeRoute = responseData.wayfinding.route_to_destination;
+          }
         }
       }
 
@@ -324,4 +329,5 @@ export const {
 } = floorSlice.actions;
 
 export const selectBleSignal = (state) => state.floor.bleSignal;
+export const selectTagFloor = (state) => state.floor.tagFloor;
 export default floorSlice.reducer;
