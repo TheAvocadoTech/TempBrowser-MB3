@@ -2,8 +2,9 @@ import axios from "axios";
 //
 
 // Base URL points to local running backend or REACT_APP_API_URL
-const rawBaseUrl =
+const configuredUrl =
   process.env.REACT_APP_API_URL || "http://localhost:8000/api/IDVisitor";
+const rawBaseUrl = configuredUrl.replace(/^https:\/\/localhost/i, "http://localhost").replace(/^https:\/\/127\.0\.0\.1/i, "http://127.0.0.1");
 
 const API_BASE_URL = rawBaseUrl.endsWith("/IDVisitor")
   ? rawBaseUrl
@@ -151,9 +152,10 @@ export const getVisitorLocation = async (visitorId = "current") => {
       const response = await apiClient.get(
         `/visitors/${targetId}/location?includePath=true`
       );
-      if (response?.data && (response.data.location || response.data.visitor || response.data.target_coordinates)) {
+      const resPayload = response?.data?.data || response?.data;
+      if (resPayload && (resPayload.location || resPayload.visitor || resPayload.target_coordinates)) {
         cachedVisitorId = targetId;
-        return response.data;
+        return { success: true, ...resPayload };
       }
     } catch (reqErr) {
       console.warn(`Location fetch for ${targetId} failed, retrying with fresh visitor lookup...`, reqErr.message);
@@ -171,7 +173,8 @@ export const getVisitorLocation = async (visitorId = "current") => {
       const fallbackRes = await apiClient.get(
         `/visitors/${targetId}/location?includePath=true`
       );
-      return fallbackRes.data;
+      const fallbackPayload = fallbackRes?.data?.data || fallbackRes?.data;
+      return { success: true, ...fallbackPayload };
     }
 
     return {
@@ -194,10 +197,20 @@ export const getVisitorLocation = async (visitorId = "current") => {
  */
 export const getMapDetails = async (mapId) => {
   try {
+    console.log(`🗺️ [API] Requesting map details for mapId: ${mapId}`);
     const response = await apiClient.get(`/maps/${mapId}`);
+    console.log(`✅ [API] Map details response received for ${mapId}:`, {
+      id: response.data?.id,
+      name: response.data?.name,
+      ppm: response.data?.ppm,
+      width: response.data?.width,
+      height: response.data?.height,
+      url: response.data?.url,
+      hasWayfinding: !!response.data?.wayfinding_path,
+    });
     return response.data;
   } catch (error) {
-    console.warn("Map details API notice:", error.message);
+    console.warn("❌ [API] Map details API notice:", error.message);
     return null;
   }
 };
@@ -207,10 +220,15 @@ export const getMapDetails = async (mapId) => {
  */
 export const getWayfindingPath = async (mapId) => {
   try {
+    console.log(`🧭 [API] Requesting wayfinding path for mapId: ${mapId}`);
     const response = await apiClient.get(`/maps/${mapId}/wayfinding`);
+    console.log(`✅ [API] Wayfinding response for ${mapId}:`, {
+      nodesCount: response.data?.nodes?.length || (Array.isArray(response.data) ? response.data.length : 0),
+      edgesCount: response.data?.edges ? Object.keys(response.data.edges).length : 0,
+    });
     return response.data;
   } catch (error) {
-    console.warn("Wayfinding path API notice:", error.message);
+    console.warn("❌ [API] Wayfinding path API notice:", error.message);
     return null;
   }
 };

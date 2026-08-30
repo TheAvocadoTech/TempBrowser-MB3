@@ -1,8 +1,9 @@
 // src/api/assetApi.js
 import axios from "axios";
 
-const API_BASE_URL =
+const rawUrl =
   process.env.REACT_APP_API_URL || "http://localhost:8000/api/IDVisitor";
+const API_BASE_URL = rawUrl.replace(/^https:\/\/localhost/i, "http://localhost").replace(/^https:\/\/127\.0\.0\.1/i, "http://127.0.0.1");
 
 export const getAllAssets = async () => {
   try {

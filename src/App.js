@@ -45,6 +45,7 @@ export default function App() {
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
     const fetchFloorMaps = async () => {
+      console.log("🚀 [App] Initializing Floor Maps and Wayfinding data for GR and F1...");
       // Ground Floor
       try {
         const [grMapRes, grWfRes] = await Promise.allSettled([
@@ -60,6 +61,11 @@ export default function App() {
           grWfRes.status === "fulfilled" && grWfRes.value
             ? grWfRes.value.data || grWfRes.value
             : grMapData?.wayfinding_path || null;
+
+        console.log("🏢 [App] Ground Floor (GR) Map Data loaded:", {
+          mapMeta: grMapData ? { id: grMapData.id, name: grMapData.name, ppm: grMapData.ppm, url: grMapData.url } : null,
+          wayfindingData: grWfData ? { nodes: grWfData.nodes?.length || 0, edges: Object.keys(grWfData.edges || {}).length } : null,
+        });
 
         if (grMapData || grWfData) {
           dispatch(
@@ -90,6 +96,11 @@ export default function App() {
             ? f1WfRes.value.data || f1WfRes.value
             : f1MapData?.wayfinding_path || null;
 
+        console.log("🏢 [App] First Floor (F1) Map Data loaded:", {
+          mapMeta: f1MapData ? { id: f1MapData.id, name: f1MapData.name, ppm: f1MapData.ppm, url: f1MapData.url } : null,
+          wayfindingData: f1WfData ? { nodes: f1WfData.nodes?.length || 0, edges: Object.keys(f1WfData.edges || {}).length } : null,
+        });
+
         if (f1MapData || f1WfData) {
           dispatch(
             setFloorMapDetails({
@@ -113,7 +124,8 @@ export default function App() {
     isFetchingRef.current = true;
 
     try {
-      const data = await getVisitorLocation("current");
+      const rawData = await getVisitorLocation("current");
+      const data = rawData?.data || rawData;
 
       // Console log incoming values for debugging
       console.log("📡 [Frontend API Response] Live Location & Wayfinding Data:", {

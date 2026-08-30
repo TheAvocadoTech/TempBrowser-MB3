@@ -68,7 +68,9 @@ function findWayfindingNode(nodesList, targetId) {
   // 1. Exact match on name/id
   let found = list.find((n) => {
     if (!n) return false;
-    const name = String(n.name || n.id || "").trim().toUpperCase();
+    const name = String(n.name || n.id || "")
+      .trim()
+      .toUpperCase();
     return (
       name === targetStr ||
       name === `N${numOnly}` ||
@@ -356,7 +358,9 @@ export default function MapView2D({
 
   // Resolve lift coordinates for GR (midpoint of N12 & N7)
   const grLiftPos = useMemo(() => {
-    const grWf = floorMapData?.GR?.wayfindingData || (floor === "GR" ? activeWayfinding : null);
+    const grWf =
+      floorMapData?.GR?.wayfindingData ||
+      (floor === "GR" ? activeWayfinding : null);
     const grNodes = grWf?.nodes || [];
     const n12 = findWayfindingNode(grNodes, "12");
     const n7 = findWayfindingNode(grNodes, "7");
@@ -376,7 +380,9 @@ export default function MapView2D({
 
   // Resolve lift coordinates for F1 (midpoint of N48 & N45)
   const f1LiftPos = useMemo(() => {
-    const f1Wf = floorMapData?.F1?.wayfindingData || (floor === "F1" ? activeWayfinding : null);
+    const f1Wf =
+      floorMapData?.F1?.wayfindingData ||
+      (floor === "F1" ? activeWayfinding : null);
     const f1Nodes = f1Wf?.nodes || [];
     const n48 = findWayfindingNode(f1Nodes, "48");
     const n45 = findWayfindingNode(f1Nodes, "45");
@@ -426,7 +432,7 @@ export default function MapView2D({
     if (targetPos && targetPos.x !== undefined && targetPos.y !== undefined) {
       return targetPos;
     }
-    return { x: 5525.298750495607, y: 2491.837930104785 };
+    return { x: 5525.298750495607, y: 1000.837930104785 };
   }, [floor, grLiftPos, targetPos]);
 
   const hasValidTarget = useMemo(() => {
@@ -477,7 +483,15 @@ export default function MapView2D({
       );
     }
     return extracted;
-  }, [floor, isLiveFloor, f1LiftPos, effectiveTargetPos, activeWayfinding, rawStartPos, activeRoute]);
+  }, [
+    floor,
+    isLiveFloor,
+    f1LiftPos,
+    effectiveTargetPos,
+    activeWayfinding,
+    rawStartPos,
+    activeRoute,
+  ]);
 
   // Snap start position to nearest corridor wayfinding segment
   const startPos = useMemo(() => {
@@ -607,17 +621,19 @@ export default function MapView2D({
         <div className="nav-badge-texts">
           <span className="nav-badge-title">
             {isLiveFloor
-              ? (proximity || "Live Tracking Active")
-              : (floor === "F1" ? "F1 Route Preview" : "Route Preview")}
+              ? proximity || "Live Tracking Active"
+              : floor === "F1"
+                ? "F1 Route Preview"
+                : "Route Preview"}
           </span>
           <span className="nav-badge-subtitle">
             {isLiveFloor
-              ? (distanceInMeters !== null
-                  ? `${distanceInMeters} m to Target`
-                  : "Updating Location...")
-              : (previewDistanceInMeters !== null
-                  ? `${previewDistanceInMeters} m from Lift to Cabinet`
-                  : "Path from Lift to Cabinet")}
+              ? distanceInMeters !== null
+                ? `${distanceInMeters} m to Target`
+                : "Updating Location..."
+              : previewDistanceInMeters !== null
+                ? `${previewDistanceInMeters} m from Lift to Cabinet`
+                : "Path from Lift to Cabinet"}
           </span>
         </div>
       </div>
