@@ -6,7 +6,10 @@ import React, {
   useCallback,
   useEffect,
 } from "react";
+import { useSelector } from "react-redux";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import apList from "../services/ap_list.json";
+import { FLOOR_MAP_IDS } from "../constants";
 
 export const FLOORPLAN_CALIBRATION = {
   GR: { rotation: 0, scale: 0.9, offsetX: -15, offsetY: 0 },
@@ -229,6 +232,7 @@ export default function MapView2D({
   onFloorChange,
   mapDetails,
   bleLocation,
+  connectedApMac,
   targetCoordinates: targetPos,
   wayfindingData,
   floorMapData,
@@ -277,6 +281,29 @@ export default function MapView2D({
   const mapHeight = activeMapMeta?.height || 5120;
   const ppm = activeMapMeta?.ppm || 50.07391564392213;
   const calib = FLOORPLAN_CALIBRATION[floor] || FLOORPLAN_CALIBRATION.GR;
+
+  // Filter Mist APs from ap_list.json for the active floor
+  const floorAps = useMemo(() => {
+    if (!Array.isArray(apList)) return [];
+    const targetMapId =
+      activeMapMeta?.id ||
+      FLOOR_MAP_IDS[floor] ||
+      (floor === "GR"
+        ? "30141417-44ea-4982-993c-6225c9f08315"
+        : "cfa55e13-794f-4081-b1b7-e35f1ea67325");
+
+    return apList.filter((ap) => {
+      if (ap.x === undefined || ap.y === undefined || ap.x === null || ap.y === null) {
+        return false;
+      }
+      // Match by map_id
+      if (ap.map_id && ap.map_id === targetMapId) return true;
+      // Match by floor naming convention
+      if (floor === "GR" && (ap.name?.includes("-F00-") || ap.name?.includes("-GR-"))) return true;
+      if (floor === "F1" && (ap.name?.includes("-F01-") || ap.name?.includes("-F1-"))) return true;
+      return false;
+    });
+  }, [floor, activeMapMeta]);
 
   useEffect(() => {
     const loadPdfEngineAndRender = async () => {
@@ -418,11 +445,82 @@ export default function MapView2D({
       rawY = bleLocation.y_m * ppm;
     }
 
-    if (rawX == null || isNaN(rawX)) rawX = liftPos.x;
-    if (rawY == null || isNaN(rawY)) rawY = liftPos.y;
+    const isLiveLocation = bleLocation?.x != null || bleLocation?.x_m != null;
+    if (rawX == null || isNaN(rawX)) {
+      rawX = liftPos.x;
+      console.warn("⚠️ [MapView2D] Location FALLBACK: No live X coordinate, defaulting to lift anchor:", liftPos.x);
+    }
+    if (rawY == null || isNaN(rawY)) {
+      rawY = liftPos.y;
+      console.warn("⚠️ [MapView2D] Location FALLBACK: No live Y coordinate, defaulting to lift anchor:", liftPos.y);
+    }
+
+    if (isLiveLocation && isLiveFloor) {
+      console.log(`🟢 [MapView2D] Rendering LIVE MIST location on floor ${floor}: (${Math.round(rawX)}, ${Math.round(rawY)})`);
+    } else if (!isLiveFloor) {
+      console.log(`ℹ️ [MapView2D] Floor preview: Showing floor ${floor} while tag is on ${tagFloor}`);
+    }
 
     return { x: rawX, y: rawY };
-  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos]);
+  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos, tagFloor]);
+
+  const reduxApMac = useSelector(
+    (state) =>
+      state.floor?.activeApMac ||
+      state.floor?.bleSignal?.ap_mac ||
+      state.floor?.visitorPos?.ap_mac
+  );
+
+  const activeConnectedApMac =
+    connectedApMac ||
+    bleLocation?.ap_mac ||
+    bleLocation?.apMac ||
+    bleLocation?.ap ||
+    reduxApMac;
+
+  // Resolve currently connected Mist AP (matching by MAC/ID or fallback to nearest on floor)
+  const connectedAp = useMemo(() => {
+    if (!floorAps || floorAps.length === 0) return null;
+
+    const normalizeMac = (mac) => {
+      if (!mac || typeof mac !== "string") return "";
+      return mac.replace(/[:-]/g, "").toLowerCase().trim();
+    };
+
+    const targetMac = normalizeMac(activeConnectedApMac);
+
+    // 1. Try matching by MAC address or AP ID
+    if (targetMac) {
+      const match = floorAps.find((ap) => {
+        const apMac = normalizeMac(ap.mac);
+        if (apMac && apMac === targetMac) return true;
+        if (ap.id && normalizeMac(ap.id).endsWith(targetMac)) return true;
+        return false;
+      });
+      if (match) return match;
+    }
+
+    // 2. Fallback: Find nearest Mist AP on the active floor to the live start position
+    if (rawStartPos && rawStartPos.x != null && rawStartPos.y != null) {
+      let nearest = null;
+      let minDistance = Infinity;
+      floorAps.forEach((ap) => {
+        const dist = Math.hypot(ap.x - rawStartPos.x, ap.y - rawStartPos.y);
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearest = ap;
+        }
+      });
+      return nearest;
+    }
+
+    return null;
+  }, [floorAps, activeConnectedApMac, rawStartPos]);
+
+  const connectedApPos = useMemo(() => {
+    if (!connectedAp) return null;
+    return transformCoords(connectedAp.x, connectedAp.y);
+  }, [connectedAp, transformCoords]);
 
   const effectiveTargetPos = useMemo(() => {
     if (floor === "GR") {
@@ -452,22 +550,26 @@ export default function MapView2D({
 
   const backendWaypoints = useMemo(() => {
     if (floor === "GR") {
-      return calculateDijkstraPath(
+      const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
         activeWayfinding?.edges || {},
         rawStartPos,
         effectiveTargetPos,
       );
+      console.log(`🧭 [MapView2D Route GR] Path generated via Dijkstra to Lift: ${path.length} waypoints`);
+      return path;
     }
 
     // On F1: if not on live floor (previewing from GR), route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
     if (floor === "F1" && !isLiveFloor) {
-      return calculateDijkstraPath(
+      const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
         activeWayfinding?.edges || {},
         f1LiftPos,
         effectiveTargetPos,
       );
+      console.log(`🧭 [MapView2D Route F1 Preview] Path from Lift to Cabinet: ${path.length} waypoints`);
+      return path;
     }
 
     // On F1 and live floor
@@ -475,13 +577,16 @@ export default function MapView2D({
       activeRoute?.waypoints || activeRoute?.nodes || activeRoute?.path;
     const extracted = extractWaypoints(rawWaypoints);
     if (extracted.length === 0 && effectiveTargetPos) {
-      return calculateDijkstraPath(
+      const fallbackPath = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
         activeWayfinding?.edges || {},
         rawStartPos,
         effectiveTargetPos,
       );
+      console.log(`🟡 [MapView2D Route F1] Path Source: FALLBACK CLIENT DIJKSTRA (${fallbackPath.length} waypoints)`);
+      return fallbackPath;
     }
+    console.log(`🟢 [MapView2D Route F1] Path Source: LIVE BACKEND MIST ROUTE (${extracted.length} waypoints)`);
     return extracted;
   }, [
     floor,
@@ -846,6 +951,30 @@ export default function MapView2D({
           </g>
         )}
 
+        {/* ---- CONNECTED MIST AP TO LIVE LOCATION (Low Opacity Black Line) ---- */}
+        {isLiveFloor &&
+          startPos &&
+          connectedApPos &&
+          isFinite(startPos.svgX) &&
+          isFinite(startPos.svgY) &&
+          isFinite(connectedApPos.svgX) &&
+          isFinite(connectedApPos.svgY) && (
+            <line
+              x1={startPos.svgX}
+              y1={startPos.svgY}
+              x2={connectedApPos.svgX}
+              y2={connectedApPos.svgY}
+              stroke="#000000"
+              strokeOpacity="0.25"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              className="connected-mist-line"
+              style={{ pointerEvents: "none" }}
+            >
+              <title>{`Connected Mist: ${connectedAp?.name || connectedAp?.mac || "Mist AP"}`}</title>
+            </line>
+          )}
+
         {/* ---- VISITOR LIVE MARKER (Rendered ONLY on the visitor's current live floor) ---- */}
         {isLiveFloor && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
@@ -946,6 +1075,60 @@ export default function MapView2D({
                 opacity="0.85"
               />
               <title>{asset.device_name || asset.mac}</title>
+            </g>
+          );
+        })}
+
+        {/* ---- MIST AP LOCATIONS (Olive Green Dots with Name from ap_list.json) ---- */}
+        {floorAps.map((ap) => {
+          const { svgX, svgY } = transformCoords(ap.x, ap.y);
+          if (!isFinite(svgX) || !isFinite(svgY)) return null;
+
+          const isConnected =
+            connectedAp &&
+            (ap.id === connectedAp.id ||
+              ap.mac === connectedAp.mac ||
+              (ap.x === connectedAp.x && ap.y === connectedAp.y));
+
+          return (
+            <g
+              key={ap.id || ap.mac || `${ap.x}-${ap.y}`}
+              transform={`translate(${svgX}, ${svgY})`}
+              className={`mist-ap-marker ${isConnected ? "mist-ap-marker--connected" : ""}`}
+              style={{ pointerEvents: "auto" }}
+            >
+              {/* Olive Green Subtle Halo */}
+              <circle
+                r={isConnected ? "3" : "2"}
+                fill="#556b2f"
+                opacity={isConnected ? "0.4" : "0.25"}
+              />
+              {/* Olive Green Small Micro-Dot */}
+              <circle
+                r={isConnected ? "1.6" : "1.2"}
+                fill={isConnected ? "#4d7c0f" : "#6b8e23"}
+                stroke="#ffffff"
+                strokeWidth={isConnected ? "0.6" : "0.4"}
+              />
+
+              {/* AP Name Label (Clean & Compact) */}
+              <text
+                x="0"
+                y="-2.5"
+                fill="#365314"
+                fontSize="2.5"
+                fontWeight="700"
+                textAnchor="middle"
+                style={{
+                  paintOrder: "stroke",
+                  stroke: "#ffffff",
+                  strokeWidth: "0.6px",
+                  userSelect: "none",
+                }}
+              >
+                {ap.name?.replace(/^MB3-F\d+-/, "") || ap.name || ap.mac}
+              </text>
+              <title>{`${ap.name || "AP"} (${ap.mac || ""})${isConnected ? " [CONNECTED MIST]" : ""}\nModel: ${ap.model || "AP33"}\nCoords: (${Math.round(ap.x)}, ${Math.round(ap.y)})`}</title>
             </g>
           );
         })}

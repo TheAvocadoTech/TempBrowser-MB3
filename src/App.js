@@ -220,6 +220,7 @@ export default function App() {
               onFloorChange={handleFloorChange}
               mapDetails={mapMeta}
               bleLocation={visitorPos}
+              connectedApMac={bleSignal?.ap_mac || visitorPos?.ap_mac}
               targetCoordinates={targetPos}
               wayfindingData={wayfindingData}
               floorMapData={floorMapData}
