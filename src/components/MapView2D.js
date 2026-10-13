@@ -381,6 +381,15 @@ export default function MapView2D({
     [mapWidth, mapHeight],
   );
 
+  // 3-meter radius around Mist AP in SVG coordinates
+  const svgRadius3m = useMemo(() => {
+    const padding = 50;
+    const scaleX = (SVG_WIDTH - padding * 2) / mapWidth;
+    const scaleY = (SVG_HEIGHT - padding * 2) / mapHeight;
+    const scale = Math.min(scaleX, scaleY);
+    return 3 * ppm * scale;
+  }, [mapWidth, mapHeight, ppm]);
+
   const isLiveFloor = floor === tagFloor;
 
   // Resolve lift coordinates for GR (midpoint of N12 & N7)
@@ -1097,6 +1106,39 @@ export default function MapView2D({
               className={`mist-ap-marker ${isConnected ? "mist-ap-marker--connected" : ""}`}
               style={{ pointerEvents: "auto" }}
             >
+              {/* ---- 3m RADIUS CIRCLE AROUND MIST AP (Low Opacity) ---- */}
+              <circle
+                r={svgRadius3m}
+                fill={isConnected ? "rgba(0, 0, 0, 0.05)" : "rgba(85, 107, 47, 0.03)"}
+                stroke={isConnected ? "#000000" : "#556b2f"}
+                strokeOpacity={isConnected ? 0.3 : 0.15}
+                strokeWidth={isConnected ? 1.2 : 0.8}
+                strokeDasharray={isConnected ? "4 3" : "2 3"}
+                className={`mist-radius-3m-circle ${isConnected ? "mist-radius-3m-circle--connected" : ""}`}
+                style={{ pointerEvents: "none" }}
+              />
+
+              {/* 3m Indicator label for connected Mist AP */}
+              {isConnected && (
+                <text
+                  x="0"
+                  y={svgRadius3m + 3}
+                  fill="#000000"
+                  fontSize="2.2"
+                  fontWeight="700"
+                  textAnchor="middle"
+                  opacity="0.6"
+                  style={{
+                    paintOrder: "stroke",
+                    stroke: "#ffffff",
+                    strokeWidth: "0.5px",
+                    userSelect: "none",
+                  }}
+                >
+                  3m Zone
+                </text>
+              )}
+
               {/* Olive Green Subtle Halo */}
               <circle
                 r={isConnected ? "3" : "2"}

@@ -33,6 +33,7 @@ const BleSignalDiagnostics = ({
   rssiThreshold = -60,
   tagMac,        // <-- new prop: MAC address of the tag
   tagName,       // <-- optional device name
+  distToMist,    // <-- distance from tag to Mist AP in meters
 }) => {
   const quality = getSignalQuality(rssi);
   const isWeak = rssi !== null && rssi < -75;
@@ -114,6 +115,23 @@ const BleSignalDiagnostics = ({
             {ap_mac || "--"}
           </span>
         </div>
+        {distToMist !== null && distToMist !== undefined && (
+          <div className="ble-diag-metric">
+            <span className="ble-diag-metric-label">Mist Dist</span>
+            <span
+              className="ble-diag-metric-value"
+              style={{
+                color: distToMist <= 3.0 ? "#16a34a" : "#dc2626",
+                fontWeight: 600,
+              }}
+            >
+              {Number(distToMist).toFixed(2)}m
+              <span style={{ fontSize: "10px", marginLeft: "4px", opacity: 0.85 }}>
+                {distToMist <= 3.0 ? " (≤3m)" : " (>3m)"}
+              </span>
+            </span>
+          </div>
+        )}
         <div className="ble-diag-metric">
           <span className="ble-diag-metric-label">Last Seen</span>
           <span className="ble-diag-metric-value">{formatLastSeen(last_seen)}</span>

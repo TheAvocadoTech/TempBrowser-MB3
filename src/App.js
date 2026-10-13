@@ -247,6 +247,7 @@ export default function App() {
           rssiThreshold={bleSignal?.rssiThreshold}
           tagMac={bleSignal?.tagMac}
           tagName={bleSignal?.tagName}
+          distToMist={bleSignal?.distToMist}
         />
       </div>
     </div>
