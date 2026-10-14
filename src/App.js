@@ -45,7 +45,9 @@ export default function App() {
   // Load Map Details & Wayfinding Nodes for active floor (GR and F1)
   useEffect(() => {
     const fetchFloorMaps = async () => {
-      console.log("🚀 [App] Initializing Floor Maps and Wayfinding data for GR and F1...");
+      console.log(
+        "🚀 [App] Initializing Floor Maps and Wayfinding data for GR and F1...",
+      );
       // Ground Floor
       try {
         const [grMapRes, grWfRes] = await Promise.allSettled([
@@ -63,8 +65,20 @@ export default function App() {
             : grMapData?.wayfinding_path || null;
 
         console.log("🏢 [App] Ground Floor (GR) Map Data loaded:", {
-          mapMeta: grMapData ? { id: grMapData.id, name: grMapData.name, ppm: grMapData.ppm, url: grMapData.url } : null,
-          wayfindingData: grWfData ? { nodes: grWfData.nodes?.length || 0, edges: Object.keys(grWfData.edges || {}).length } : null,
+          mapMeta: grMapData
+            ? {
+                id: grMapData.id,
+                name: grMapData.name,
+                ppm: grMapData.ppm,
+                url: grMapData.url,
+              }
+            : null,
+          wayfindingData: grWfData
+            ? {
+                nodes: grWfData.nodes?.length || 0,
+                edges: Object.keys(grWfData.edges || {}).length,
+              }
+            : null,
         });
 
         if (grMapData || grWfData) {
@@ -97,8 +111,20 @@ export default function App() {
             : f1MapData?.wayfinding_path || null;
 
         console.log("🏢 [App] First Floor (F1) Map Data loaded:", {
-          mapMeta: f1MapData ? { id: f1MapData.id, name: f1MapData.name, ppm: f1MapData.ppm, url: f1MapData.url } : null,
-          wayfindingData: f1WfData ? { nodes: f1WfData.nodes?.length || 0, edges: Object.keys(f1WfData.edges || {}).length } : null,
+          mapMeta: f1MapData
+            ? {
+                id: f1MapData.id,
+                name: f1MapData.name,
+                ppm: f1MapData.ppm,
+                url: f1MapData.url,
+              }
+            : null,
+          wayfindingData: f1WfData
+            ? {
+                nodes: f1WfData.nodes?.length || 0,
+                edges: Object.keys(f1WfData.edges || {}).length,
+              }
+            : null,
         });
 
         if (f1MapData || f1WfData) {
@@ -128,44 +154,81 @@ export default function App() {
       const data = rawData?.data || rawData;
 
       // Console log incoming values for debugging
-      console.log("📡 [Frontend API Response] Live Location & Wayfinding Data:", {
-        visitor: data?.visitor ? `${data.visitor.name || data.visitor.visitorName} (${data.visitor.idNumber || data.visitor.id})` : null,
-        location: data?.location ? { x: data.location.x, y: data.location.y, x_m: data.location.x_m || data.location.smoothed_position?.x_m, y_m: data.location.y_m || data.location.smoothed_position?.y_m, rssi: data.location.rssi } : null,
-        target_coordinates: data?.target_coordinates || null,
-        distance: data?.distance || null,
-        proximity: data?.proximity || null,
-        wayfinding: data?.wayfinding ? {
-          total_nodes: data.wayfinding.total_nodes || data.wayfinding.nodes?.length,
-          route_nodes: data.wayfinding.route_to_destination?.nodes?.length || 0,
-          route_path: data.wayfinding.route_to_destination?.path || [],
-          waypoints: data.wayfinding.route_to_destination?.nodes || []
-        } : "none",
-      });
+      console.log(
+        "📡 [Frontend API Response] Live Location & Wayfinding Data:",
+        {
+          visitor: data?.visitor
+            ? `${data.visitor.name || data.visitor.visitorName} (${data.visitor.idNumber || data.visitor.id})`
+            : null,
+          location: data?.location
+            ? {
+                x: data.location.x,
+                y: data.location.y,
+                x_m: data.location.x_m || data.location.smoothed_position?.x_m,
+                y_m: data.location.y_m || data.location.smoothed_position?.y_m,
+                rssi: data.location.rssi,
+              }
+            : null,
+          target_coordinates: data?.target_coordinates || null,
+          distance: data?.distance || null,
+          proximity: data?.proximity || null,
+          wayfinding: data?.wayfinding
+            ? {
+                total_nodes:
+                  data.wayfinding.total_nodes || data.wayfinding.nodes?.length,
+                route_nodes:
+                  data.wayfinding.route_to_destination?.nodes?.length || 0,
+                route_path: data.wayfinding.route_to_destination?.path || [],
+                waypoints: data.wayfinding.route_to_destination?.nodes || [],
+              }
+            : "none",
+        },
+      );
 
       if (data && (data.success || data.location || data.target_coordinates)) {
         dispatch(updateLiveLocation(data));
-        
-        // If the response contains bleSignal, pass it via updateLiveLocation
-        if (data.bleSignal) {
-          dispatch(updateLiveLocation({
-            bleSignal: {
-              rssi: data.bleSignal.rssi,
-              raw_rssi: data.bleSignal.raw_rssi,
-              beam: data.bleSignal.beam,
-              ap_mac: data.bleSignal.ap_mac,
-              last_seen: data.bleSignal.last_seen || Date.now() / 1000,
-              x: data.bleSignal.x,
-              y: data.bleSignal.y,
-              x_m: data.bleSignal.x_m,
-              y_m: data.bleSignal.y_m,
-              queueSize: data.bleSignal.queueSize,
-              queueCapacity: data.bleSignal.queueCapacity,
-              rssiThreshold: data.bleSignal.rssiThreshold,
-            }
-          }));
+
+        // ────────────────────────────────────────────────────────────
+        // Derive bleSignal from data.location.
+        // The backend does NOT send `data.bleSignal` — it sends everything
+        // under `data.location`. Map that into the bleSignal shape that
+        // BleSignalDiagnostics expects.
+        // ────────────────────────────────────────────────────────────
+        if (data.location) {
+          const loc = data.location;
+          const smoothed = loc.smoothed_position || {};
+          const px = loc.pixel_coordinates || {};
+
+          dispatch(
+            updateLiveLocation({
+              bleSignal: {
+                rssi: loc.rssi,
+                raw_rssi: loc.raw_rssi ?? loc.rssi,
+                beam: loc.beam,
+                ap_mac: loc.ap_mac,
+                last_seen: Date.now() / 1000,
+                // Pixel coords (used by "Smoothed Coords (px)" row)
+                x: px.x ?? loc.x ?? null,
+                y: px.y ?? loc.y ?? null,
+                // Meter coords (used by "Smoothed Position (m)" row)
+                x_m: smoothed.x_m ?? loc.x_m ?? null,
+                y_m: smoothed.y_m ?? loc.y_m ?? null,
+                // Diagnostics
+                queueSize: 0,
+                queueCapacity: 8,
+                rssiThreshold: -65,
+                distToMist: loc.mist_dist ?? null,
+                tagMac: loc.mac,
+                tagName: loc.device_name || loc.name,
+              },
+            }),
+          );
         }
       } else {
-        console.warn("⚠️ [Frontend] Received empty or invalid location response:", data);
+        console.warn(
+          "⚠️ [Frontend] Received empty or invalid location response:",
+          data,
+        );
       }
     } catch (err) {
       console.warn("Realtime location poll notice:", err.message);
@@ -174,7 +237,7 @@ export default function App() {
     }
   }, [dispatch]);
 
-  // Real-time backend polling interval (1000ms) with client-side 60fps LERP smoothing
+  // Real-time backend polling interval (1000ms)
   useEffect(() => {
     fetchRealtimeLocation();
 
@@ -252,4 +315,4 @@ export default function App() {
       </div>
     </div>
   );
-}
+}
