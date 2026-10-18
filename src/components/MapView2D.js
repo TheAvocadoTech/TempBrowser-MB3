@@ -224,10 +224,13 @@ function calculateDijkstraPath(nodesList, edgesMap, startPos, endPos) {
     });
   }
 
+  const nodeMap = new Map();
+  list.forEach((n) => nodeMap.set(String(n.name || n.id), n));
+
   const pathNodes = [];
   let curr = endName;
   while (curr) {
-    const nodeObj = list.find((n) => String(n.name || n.id) === curr);
+    const nodeObj = nodeMap.get(curr);
     if (nodeObj) {
       const p = nodeObj.position || nodeObj;
       pathNodes.unshift({ x: Number(p.x), y: Number(p.y), name: curr });
@@ -407,7 +410,7 @@ export default function MapView2D({
     }
 
     return { nodes, edges };
-  }, [rawWayfinding, floor, grLiftPos]);
+  }, [rawWayfinding, floor]);
   const mapWidth = activeMapMeta?.width || 6400;
   const mapHeight = activeMapMeta?.height || 5120;
   const ppm = activeMapMeta?.ppm || 50.07391564392213;
@@ -1370,29 +1373,6 @@ export default function MapView2D({
           </g>
         )}
 
-        {/* ---- CONNECTED MIST AP TO LIVE LOCATION (Low Opacity Black Line) ---- */}
-        {isLiveFloor &&
-          startPos &&
-          connectedApPos &&
-          isFinite(startPos.svgX) &&
-          isFinite(startPos.svgY) &&
-          isFinite(connectedApPos.svgX) &&
-          isFinite(connectedApPos.svgY) && (
-            <line
-              x1={startPos.svgX}
-              y1={startPos.svgY}
-              x2={connectedApPos.svgX}
-              y2={connectedApPos.svgY}
-              stroke="#000000"
-              strokeOpacity="0.25"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              className="connected-mist-line"
-              style={{ pointerEvents: "none" }}
-            >
-              <title>{`Connected Mist: ${connectedAp?.name || connectedAp?.mac || "Mist AP"}`}</title>
-            </line>
-          )}
 
         {/* ---- VISITOR LIVE MARKER ---- */}
         {isLiveFloor && startPos && (
