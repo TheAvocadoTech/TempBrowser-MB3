@@ -235,6 +235,15 @@ function calculateDijkstraPath(nodesList, edgesMap, startPos, endPos) {
     curr = previous[curr];
   }
 
+  // ── Safety net: if both endpoints snapped to the SAME node, draw a
+  //    direct line from start to end instead of returning a 1-node path.
+  if (startName === endName) {
+    return [
+      { x: startPos.x, y: startPos.y },
+      { x: endPos.x, y: endPos.y },
+    ];
+  }
+
   if (
     pathNodes.length === 0 ||
     (pathNodes[0].name !== startName && list.length > 1)
@@ -304,7 +313,7 @@ export default function MapView2D({
           (ap) =>
             ap.name?.includes("-AP19") ||
             ap.name?.includes("AP19") ||
-            ap.mac === "c878678aa0a8"
+            ap.mac === "c878678aa0a8",
         )
       : null;
     if (ap19 && ap19.x !== undefined && ap19.y !== undefined) {
@@ -388,7 +397,11 @@ export default function MapView2D({
       mergedEdges.N4 = { N10: { weight: 1 }, N5: { weight: 1 } };
       mergedEdges.NLift = { N12: { weight: 1 }, N13: { weight: 1 } };
       mergedEdges.N12 = { ...(mergedEdges.N12 || {}), NLift: { weight: 1 } };
-      mergedEdges.N13 = { ...(mergedEdges.N13 || {}), NLift: { weight: 1 }, N7: { weight: 1 } };
+      mergedEdges.N13 = {
+        ...(mergedEdges.N13 || {}),
+        NLift: { weight: 1 },
+        N7: { weight: 1 },
+      };
 
       return { nodes: Array.from(mergedNodesMap.values()), edges: mergedEdges };
     }
@@ -411,14 +424,25 @@ export default function MapView2D({
         : "cfa55e13-794f-4081-b1b7-e35f1ea67325");
 
     return apList.filter((ap) => {
-      if (ap.x === undefined || ap.y === undefined || ap.x === null || ap.y === null) {
+      if (
+        ap.x === undefined ||
+        ap.y === undefined ||
+        ap.x === null ||
+        ap.y === null
+      ) {
         return false;
       }
-      // Match by map_id
       if (ap.map_id && ap.map_id === targetMapId) return true;
-      // Match by floor naming convention
-      if (floor === "GR" && (ap.name?.includes("-F00-") || ap.name?.includes("-GR-"))) return true;
-      if (floor === "F1" && (ap.name?.includes("-F01-") || ap.name?.includes("-F1-"))) return true;
+      if (
+        floor === "GR" &&
+        (ap.name?.includes("-F00-") || ap.name?.includes("-GR-"))
+      )
+        return true;
+      if (
+        floor === "F1" &&
+        (ap.name?.includes("-F01-") || ap.name?.includes("-F1-"))
+      )
+        return true;
       return false;
     });
   }, [floor, activeMapMeta]);
@@ -510,8 +534,6 @@ export default function MapView2D({
 
   const isLiveFloor = floor === tagFloor;
 
-
-
   // Resolve lift coordinates for F1 (midpoint of N48 & N45)
   const f1LiftPos = useMemo(() => {
     const f1Wf =
@@ -537,7 +559,7 @@ export default function MapView2D({
   const liftPos = floor === "F1" ? f1LiftPos : grLiftPos;
 
   const rawStartPos = useMemo(() => {
-    // If viewing F1 while tag is in GR, navigation starts from the F1 Lift (between N48 and N45)
+    // If viewing F1 while tag is in GR, navigation starts from the F1 Lift
     if (!isLiveFloor && floor === "F1") {
       return f1LiftPos;
     }
@@ -557,27 +579,46 @@ export default function MapView2D({
     const isLiveLocation = bleLocation?.x != null || bleLocation?.x_m != null;
     if (rawX == null || isNaN(rawX)) {
       rawX = liftPos.x;
-      console.warn("⚠️ [MapView2D] Location FALLBACK: No live X coordinate, defaulting to lift anchor:", liftPos.x);
+      console.warn(
+        "⚠️ [MapView2D] Location FALLBACK: No live X coordinate, defaulting to lift anchor:",
+        liftPos.x,
+      );
     }
     if (rawY == null || isNaN(rawY)) {
       rawY = liftPos.y;
-      console.warn("⚠️ [MapView2D] Location FALLBACK: No live Y coordinate, defaulting to lift anchor:", liftPos.y);
+      console.warn(
+        "⚠️ [MapView2D] Location FALLBACK: No live Y coordinate, defaulting to lift anchor:",
+        liftPos.y,
+      );
     }
 
     if (isLiveLocation && isLiveFloor) {
-      console.log(`🟢 [MapView2D] Rendering LIVE MIST location on floor ${floor}: (${Math.round(rawX)}, ${Math.round(rawY)})`);
+      console.log(
+        `🟢 [MapView2D] Rendering LIVE MIST location on floor ${floor}: (${Math.round(rawX)}, ${Math.round(rawY)})`,
+      );
     } else if (!isLiveFloor) {
-      console.log(`ℹ️ [MapView2D] Floor preview: Showing floor ${floor} while tag is on ${tagFloor}`);
+      console.log(
+        `ℹ️ [MapView2D] Floor preview: Showing floor ${floor} while tag is on ${tagFloor}`,
+      );
     }
 
     return { x: rawX, y: rawY };
-  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos, tagFloor, activeMapMeta]);
+  }, [
+    isLiveFloor,
+    floor,
+    bleLocation,
+    ppm,
+    liftPos,
+    f1LiftPos,
+    tagFloor,
+    activeMapMeta,
+  ]);
 
   const reduxApMac = useSelector(
     (state) =>
       state.floor?.activeApMac ||
       state.floor?.bleSignal?.ap_mac ||
-      state.floor?.visitorPos?.ap_mac
+      state.floor?.visitorPos?.ap_mac,
   );
 
   const activeConnectedApMac =
@@ -587,7 +628,7 @@ export default function MapView2D({
     bleLocation?.ap ||
     reduxApMac;
 
-  // Resolve currently connected Mist AP (matching by MAC/ID or fallback to nearest on floor)
+  // Resolve currently connected Mist AP
   const connectedAp = useMemo(() => {
     if (!floorAps || floorAps.length === 0) return null;
 
@@ -598,7 +639,6 @@ export default function MapView2D({
 
     const targetMac = normalizeMac(activeConnectedApMac);
 
-    // 1. Try matching by MAC address or AP ID
     if (targetMac) {
       const match = floorAps.find((ap) => {
         const apMac = normalizeMac(ap.mac);
@@ -609,7 +649,6 @@ export default function MapView2D({
       if (match) return match;
     }
 
-    // 2. Fallback: Find nearest Mist AP on the active floor to the live start position
     if (rawStartPos && rawStartPos.x != null && rawStartPos.y != null) {
       let nearest = null;
       let minDistance = Infinity;
@@ -657,8 +696,16 @@ export default function MapView2D({
     return null;
   }, [hasValidTarget, effectiveTargetPos, transformCoords]);
 
+  // ──────────────────────────────────────────────────────────────
+  // Route resolution
+  //
+  // 1. Prefer the BACKEND's precomputed route (activeRoute) — works
+  //    on both GR and F1 now that the backend injects EXTRA_NODES
+  //    for Ground Floor.
+  // 2. Fall back to client-side Dijkstra if the backend route is
+  //    empty or has < 2 waypoints.
+  // ──────────────────────────────────────────────────────────────
   const backendWaypoints = useMemo(() => {
-    // Ground Floor: Route from live start position to Lift
     if (floor === "GR") {
       const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
@@ -666,11 +713,13 @@ export default function MapView2D({
         rawStartPos,
         grLiftPos,
       );
-      console.log(`🧭 [MapView2D Route GR] Path generated via Dijkstra to Lift: ${path.length} waypoints`);
+      console.log(
+        `🧭 [MapView2D Route GR] Client Dijkstra fallback: ${path.length} waypoints`,
+      );
       return path;
     }
 
-    // F1 Preview from GR: Route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
+    // On F1: if not on live floor (previewing from GR), route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
     if (floor === "F1" && !isLiveFloor) {
       const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
@@ -678,32 +727,32 @@ export default function MapView2D({
         f1LiftPos,
         effectiveTargetPos,
       );
-      console.log(`🧭 [MapView2D Route F1 Preview] Path from Lift to Cabinet: ${path.length} waypoints`);
+      console.log(
+        `🧭 [MapView2D Route F1 Preview] Client Dijkstra fallback: ${path.length} waypoints`,
+      );
       return path;
     }
 
-    // F1 Live: Prioritize live backend route
+    // On F1 and live floor
     const rawWaypoints =
       activeRoute?.waypoints || activeRoute?.nodes || activeRoute?.path;
     const extracted = extractWaypoints(rawWaypoints);
-    if (extracted.length > 0) {
-      console.log(`🟢 [MapView2D Route F1] Path Source: LIVE BACKEND MIST ROUTE (${extracted.length} waypoints)`);
-      return extracted;
-    }
-
-    // F1 Fallback client-side Dijkstra
-    if (effectiveTargetPos && activeWayfinding?.nodes?.length > 0) {
+    if (extracted.length === 0 && effectiveTargetPos) {
       const fallbackPath = calculateDijkstraPath(
-        activeWayfinding.nodes,
-        activeWayfinding.edges || {},
+        activeWayfinding?.nodes || [],
+        activeWayfinding?.edges || {},
         rawStartPos,
         effectiveTargetPos,
       );
-      console.log(`🟡 [MapView2D Route F1] Path Source: CLIENT DIJKSTRA (${fallbackPath.length} waypoints)`);
+      console.log(
+        `🟡 [MapView2D Route F1] Path Source: FALLBACK CLIENT DIJKSTRA (${fallbackPath.length} waypoints)`,
+      );
       return fallbackPath;
     }
-
-    return [];
+    console.log(
+      `🟢 [MapView2D Route F1] Path Source: LIVE BACKEND MIST ROUTE (${extracted.length} waypoints)`,
+    );
+    return extracted;
   }, [
     floor,
     isLiveFloor,
@@ -747,8 +796,8 @@ export default function MapView2D({
         }
       }
 
-      // If within corridor radius (1.0 meter), snap to centerline
-      if (bestSnapped && bestSnapped.distMeters <= 1.0) {
+      // If within corridor radius (2.8 meters), snap to centerline
+      if (bestSnapped && bestSnapped.distMeters <= 2.8) {
         activeX = bestSnapped.x;
         activeY = bestSnapped.y;
       }
@@ -761,7 +810,6 @@ export default function MapView2D({
     if (backendWaypoints.length === 0) return [];
     if (!isLiveFloor) return backendWaypoints;
 
-    // Find closest waypoint ahead of startPos
     let closestIdx = 0;
     let minDist = Infinity;
     backendWaypoints.forEach((wpt, idx) => {
@@ -978,7 +1026,10 @@ export default function MapView2D({
 
         if (state.startDistance > 0) {
           const ratio = dist / state.startDistance;
-          const newZoom = Math.min(Math.max(state.startZoom * ratio, 0.4), 10.0);
+          const newZoom = Math.min(
+            Math.max(state.startZoom * ratio, 0.4),
+            10.0,
+          );
 
           const scaleChange = newZoom / state.startZoom;
           const dragX = currentMid.x - state.startX;
@@ -1192,11 +1243,10 @@ export default function MapView2D({
                 (n) => (n.name || n.id) === targetName,
               );
               if (!targetNode) return null;
-              const tX = targetNode.position?.x ?? targetNode.x;
-              const tY = targetNode.position?.y ?? targetNode.y;
-              if (tX === undefined || tY === undefined) return null;
-              const targetPos = transformCoords(tX, tY);
-
+              const targetPos = transformCoords(
+                targetNode.position.x,
+                targetNode.position.y,
+              );
               // Avoid duplicate lines (only draw if source < target alphabetically)
               if (sourceName > targetName) return null;
               return (
@@ -1215,7 +1265,7 @@ export default function MapView2D({
             });
           })}
 
-        {/* ---- WAYFINDING NODES: Dots with clear labels ---- */}
+        {/* ---- WAYFINDING NODES: Small dots (temporary) ---- */}
         {activeWayfinding?.nodes &&
           activeWayfinding.nodes.map((node) => {
             const nodeName = node.name || node.id;
@@ -1224,13 +1274,12 @@ export default function MapView2D({
             if (posX === undefined || posY === undefined) return null;
             const { svgX, svgY } = transformCoords(posX, posY);
             return (
-              <g key={nodeName || `${posX}-${posY}`} transform={`translate(${svgX}, ${svgY})`}>
+              <g
+                key={nodeName || `${posX}-${posY}`}
+                transform={`translate(${svgX}, ${svgY})`}
+              >
                 {/* Subtle Cyan Halo */}
-                <circle
-                  r="3.2"
-                  fill="#0284c7"
-                  opacity="0.25"
-                />
+                <circle r="3.2" fill="#0284c7" opacity="0.25" />
                 {/* Dot */}
                 <circle
                   r="1.6"
@@ -1321,11 +1370,33 @@ export default function MapView2D({
           </g>
         )}
 
+        {/* ---- CONNECTED MIST AP TO LIVE LOCATION (Low Opacity Black Line) ---- */}
+        {isLiveFloor &&
+          startPos &&
+          connectedApPos &&
+          isFinite(startPos.svgX) &&
+          isFinite(startPos.svgY) &&
+          isFinite(connectedApPos.svgX) &&
+          isFinite(connectedApPos.svgY) && (
+            <line
+              x1={startPos.svgX}
+              y1={startPos.svgY}
+              x2={connectedApPos.svgX}
+              y2={connectedApPos.svgY}
+              stroke="#000000"
+              strokeOpacity="0.25"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              className="connected-mist-line"
+              style={{ pointerEvents: "none" }}
+            >
+              <title>{`Connected Mist: ${connectedAp?.name || connectedAp?.mac || "Mist AP"}`}</title>
+            </line>
+          )}
 
-        {/* ---- VISITOR LIVE MARKER (Rendered ONLY on the visitor's current live floor) ---- */}
+        {/* ---- VISITOR LIVE MARKER ---- */}
         {isLiveFloor && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
-            {/* Outer Pulsing Aura */}
             <circle
               r="5.5"
               fill="#0085ff"
@@ -1333,8 +1404,8 @@ export default function MapView2D({
               className="ble-pulse-aura"
             />
             {/* Live Blue Location Disc */}
-            <circle r="3" fill="#0085ff" stroke="#ffffff" strokeWidth="0.8" />
-            <circle r="1" fill="#ffffff" />
+            <circle r="6.5" fill="#0085ff" stroke="#ffffff" strokeWidth="1.5" />
+            <circle r="2" fill="#ffffff" />
             {/* Directional Google Maps Arrow pointing to target waypoint */}
             {(destPos || (forwardWaypoints && forwardWaypoints.length > 0)) && (
               <g
@@ -1393,7 +1464,6 @@ export default function MapView2D({
 
         {destPos && (
           <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
-            {/* Outer Red Target Halo */}
             <circle
               r="6"
               fill="#ef4444"
@@ -1401,14 +1471,12 @@ export default function MapView2D({
               className="ble-pulse-aura"
             />
             {/* Inner Red Target Pin Disc */}
-            <circle r="3.2" fill="#ef4444" stroke="#ffffff" strokeWidth="0.8" />
-            <circle r="1.2" fill="#ffffff" />
+            <circle r="7.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1.5" />
+            <circle r="3" fill="#ffffff" />
           </g>
         )}
 
-
-
-        {/* ---- MIST AP LOCATIONS (Olive Green Dots with Name from ap_list.json) ---- */}
+        {/* ---- MIST AP LOCATIONS ---- */}
         {floorAps.map((ap) => {
           const { svgX, svgY } = transformCoords(ap.x, ap.y);
           if (!isFinite(svgX) || !isFinite(svgY)) return null;
@@ -1426,10 +1494,13 @@ export default function MapView2D({
               className={`mist-ap-marker ${isConnected ? "mist-ap-marker--connected" : ""}`}
               style={{ pointerEvents: "auto" }}
             >
-              {/* ---- 3m RADIUS CIRCLE AROUND MIST AP (Low Opacity) ---- */}
               <circle
                 r={svgRadius3m}
-                fill={isConnected ? "rgba(0, 0, 0, 0.05)" : "rgba(85, 107, 47, 0.03)"}
+                fill={
+                  isConnected
+                    ? "rgba(0, 0, 0, 0.05)"
+                    : "rgba(85, 107, 47, 0.03)"
+                }
                 stroke={isConnected ? "#000000" : "#556b2f"}
                 strokeOpacity={isConnected ? 0.3 : 0.15}
                 strokeWidth={isConnected ? 1.2 : 0.8}
@@ -1438,7 +1509,6 @@ export default function MapView2D({
                 style={{ pointerEvents: "none" }}
               />
 
-              {/* 3m Indicator label for connected Mist AP */}
               {isConnected && (
                 <text
                   x="0"
@@ -1459,13 +1529,11 @@ export default function MapView2D({
                 </text>
               )}
 
-              {/* Olive Green Subtle Halo */}
               <circle
                 r={isConnected ? "3" : "2"}
                 fill="#556b2f"
                 opacity={isConnected ? "0.4" : "0.25"}
               />
-              {/* Olive Green Small Micro-Dot */}
               <circle
                 r={isConnected ? "1.6" : "1.2"}
                 fill={isConnected ? "#4d7c0f" : "#6b8e23"}
@@ -1473,7 +1541,6 @@ export default function MapView2D({
                 strokeWidth={isConnected ? "0.6" : "0.4"}
               />
 
-              {/* AP Name Label (Clean & Compact) */}
               <text
                 x="0"
                 y="-2.5"
