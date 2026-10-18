@@ -37,10 +37,13 @@ export const useAssetPolling = (interval = 5000) => {
                   x_m: data.x_m,
                   y_m: data.y_m,
                 },
-                position_px: data.position_px || {
+                position_px: data.position_px || (data.trail_px && data.trail_px.length > 0 ? {
+                  x: data.trail_px[data.trail_px.length - 1].x,
+                  y: data.trail_px[data.trail_px.length - 1].y,
+                } : {
                   x: rawData.x || data.x,
                   y: rawData.y || data.y,
-                },
+                }),
                 ap_mac: data.ap_mac || rawData.ap_mac,
                 beam: data.beam !== undefined ? data.beam : rawData.beam,
                 rssi: data.rssi !== undefined ? data.rssi : rawData.rssi,

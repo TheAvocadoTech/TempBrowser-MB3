@@ -104,11 +104,16 @@ export const getVisitorLocation = async (visitorId = "current") => {
 
       if (urlVisitorId) {
         targetId = urlVisitorId;
+        console.log(`🔍 [Location Source] Using URL visitorId: ${targetId}`);
       } else if (urlToken) {
+        console.log(`🔑 [Location Source] Checking URL token: ${urlToken.substring(0, 10)}...`);
         const tokenRes = await getVisitorByToken(urlToken);
         if (tokenRes && (tokenRes.data || tokenRes.id)) {
           const vData = tokenRes.data || tokenRes;
           targetId = vData._id || vData.id;
+          console.log(`🟢 [Location Source] Token resolved to visitor: "${vData.visitorName || vData.name}" (ID: ${targetId}, Tag: ${vData.idNumber || vData.tagMac || "None"})`);
+        } else {
+          console.warn(`🔴 [Location Source] Token lookup failed/invalid. Entering fallback mode.`);
         }
       } else if (urlMac || urlTag) {
         const visitorsRes = await getAllVisitors();
@@ -120,6 +125,7 @@ export const getVisitorLocation = async (visitorId = "current") => {
         );
         if (match) {
           targetId = match._id || match.id;
+          console.log(`🟢 [Location Source] MAC/Tag matched visitor: "${match.visitorName || match.name}" (ID: ${targetId})`);
         }
       }
     }
@@ -129,22 +135,30 @@ export const getVisitorLocation = async (visitorId = "current") => {
 
     // 2. Resolve cached or active visitor ID if targetId is still not valid Mongo ID
     if (!isValidMongoId(targetId)) {
-      if (cachedVisitorId) {
+      if (cachedVisitorId && isValidMongoId(cachedVisitorId)) {
         targetId = cachedVisitorId;
+        console.log(`ℹ️ [Location Source] Using cached visitor ID: ${targetId}`);
       } else {
+        console.warn(`⚠️ [Location Source] Target visitor ID missing. Attempting fallback to active visitor in DB...`);
         const visitorsRes = await getAllVisitors();
         const vList = visitorsRes?.data || (Array.isArray(visitorsRes) ? visitorsRes : []);
         if (Array.isArray(vList) && vList.length > 0) {
-          const activeVisitor = vList.find((v) => v.idNumber || v._id) || vList[0];
+          const activeVisitor =
+            vList.find((v) => v.isOnVisit && v.tagMac) ||
+            vList.find((v) => v.checkedIn && v.tagMac) ||
+            vList.find((v) => v.idNumber || v.tagMac) ||
+            vList[0];
           targetId = activeVisitor._id || activeVisitor.id;
           cachedVisitorId = targetId;
+          console.warn(`🟡 [Location Source] ACTIVE VISITOR FOUND: "${activeVisitor.visitorName || activeVisitor.name}" (ID: ${targetId}, Tag: ${activeVisitor.tagMac || activeVisitor.idNumber || "None"})`);
         }
       }
     }
 
-    // Fallback default active visitor ID (Sarath Suresh in DB)
+    // Default active fallback visitor ID from current database (John Doe with live Kontakt tag)
     if (!targetId || !isValidMongoId(targetId)) {
-      targetId = "6a80369e83f5e8026f6444a9";
+      targetId = "6ac1d6878456c7dcd6b1fd7b";
+      console.warn(`🟢 [Location Source] DEFAULT ACTIVE VISITOR ID USED: ${targetId}`);
     }
 
     // Try fetching location for targetId
@@ -155,6 +169,28 @@ export const getVisitorLocation = async (visitorId = "current") => {
       const resPayload = response?.data?.data || response?.data;
       if (resPayload && (resPayload.location || resPayload.visitor || resPayload.target_coordinates)) {
         cachedVisitorId = targetId;
+
+        const isLiveMist = !!(resPayload.location?.x != null || resPayload.location?.x_m != null);
+        const hasLivePath = !!(resPayload.wayfinding?.route_to_destination?.nodes?.length > 0);
+
+        console.log(
+          isLiveMist ? "🟢 [STATUS: LIVE MIST LOCATION]" : "🔴 [STATUS: FALLBACK LOCATION]",
+          {
+            locationMode: isLiveMist ? "LIVE MIST DATA" : "FALLBACK",
+            coordinates: {
+              x: resPayload.location?.x,
+              y: resPayload.location?.y,
+              x_m: resPayload.location?.smoothed_position?.x_m ?? resPayload.location?.x_m,
+              y_m: resPayload.location?.smoothed_position?.y_m ?? resPayload.location?.y_m,
+            },
+            rssi: resPayload.location?.rssi,
+            apMac: resPayload.location?.ap_mac,
+            tagFloor: resPayload.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ? "F1" : "GR",
+            pathMode: hasLivePath ? "LIVE BACKEND MIST ROUTE" : "FALLBACK (Client Dijkstra will generate)",
+            pathNodesCount: resPayload.wayfinding?.route_to_destination?.nodes?.length || 0,
+          }
+        );
+
         return { success: true, ...resPayload };
       }
     } catch (reqErr) {
@@ -169,6 +205,7 @@ export const getVisitorLocation = async (visitorId = "current") => {
       const activeVisitor = vList[0];
       targetId = activeVisitor._id || activeVisitor.id;
       cachedVisitorId = targetId;
+      console.warn(`🟡 [Location Source] RETRY WITH FALLBACK VISITOR: ${targetId}`);
 
       const fallbackRes = await apiClient.get(
         `/visitors/${targetId}/location?includePath=true`

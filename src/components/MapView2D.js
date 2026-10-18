@@ -16,6 +16,38 @@ export const FLOORPLAN_CALIBRATION = {
   F1: { rotation: 0, scale: 0.9, offsetX: -12, offsetY: 0 },
 };
 
+// Ground floor corridor wayfinding network (MB3-F00 corridors, lift near AP19)
+export const DEFAULT_GR_WAYFINDING = {
+  nodes: [
+    { name: "N1", position: { x: 4985.9, y: 1179.7 } },
+    { name: "N9", position: { x: 5491.48, y: 1348.23 } },
+    { name: "N12", position: { x: 4997.36, y: 1727.92 } },
+    { name: "NLift", position: { x: 5296.38, y: 1722.96 } }, // Directly at AP19
+    { name: "N13", position: { x: 5459.88, y: 1717.72 } },
+    { name: "N7", position: { x: 5450.14, y: 1831.55 } },
+    { name: "N6", position: { x: 5465.0, y: 2011.0 } }, // Hallway opposite AP23
+    { name: "N8", position: { x: 5465.0, y: 2435.6 } }, // Hallway outside visitor room doorway
+    { name: "N10", position: { x: 5465.0, y: 2800.0 } }, // Hallway near AP15
+    { name: "N4", position: { x: 5462.86, y: 3256.09 } },
+    { name: "N5", position: { x: 5029.71, y: 3274.7 } },
+    { name: "N2", position: { x: 5036.77, y: 3612.23 } },
+  ],
+  edges: {
+    N1: { N12: { weight: 1 } },
+    N12: { N1: { weight: 1 }, NLift: { weight: 1 }, N5: { weight: 1 } },
+    NLift: { N12: { weight: 1 }, N13: { weight: 1 } },
+    N13: { NLift: { weight: 1 }, N9: { weight: 1 }, N7: { weight: 1 } },
+    N9: { N13: { weight: 1 } },
+    N7: { N13: { weight: 1 }, N6: { weight: 1 } },
+    N6: { N7: { weight: 1 }, N8: { weight: 1 } },
+    N8: { N6: { weight: 1 }, N10: { weight: 1 } },
+    N10: { N8: { weight: 1 }, N4: { weight: 1 } },
+    N4: { N10: { weight: 1 }, N5: { weight: 1 } },
+    N5: { N4: { weight: 1 }, N12: { weight: 1 }, N2: { weight: 1 } },
+    N2: { N5: { weight: 1 } },
+  },
+};
+
 function extractWaypoints(rawRoute) {
   if (!rawRoute) return [];
   let list = [];
@@ -244,7 +276,20 @@ export default function MapView2D({
   const [zoom, setZoom] = useState(3.2);
   const [pan, setPan] = useState({ x: -320, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const panRef = useRef({ x: -320, y: 0 });
+  const zoomRef = useRef(3.2);
+  const touchStateRef = useRef({
+    mode: "none",
+    startX: 0,
+    startY: 0,
+    startPanX: 0,
+    startPanY: 0,
+    startDistance: 0,
+    startZoom: 3.2,
+    midX: 0,
+    midY: 0,
+  });
   const [renderedPdfImage, setRenderedPdfImage] = useState({
     GR: null,
     F1: null,
@@ -252,31 +297,104 @@ export default function MapView2D({
   const renderedPdfImageRef = useRef({ GR: null, F1: null });
   const containerRef = useRef(null);
 
+  // Resolve lift coordinates for GR: located directly near AP19 (x: 5296.38, y: 1722.96)
+  const grLiftPos = useMemo(() => {
+    const ap19 = Array.isArray(apList)
+      ? apList.find(
+          (ap) =>
+            ap.name?.includes("-AP19") ||
+            ap.name?.includes("AP19") ||
+            ap.mac === "c878678aa0a8"
+        )
+      : null;
+    if (ap19 && ap19.x !== undefined && ap19.y !== undefined) {
+      return { x: Number(ap19.x), y: Number(ap19.y) };
+    }
+    return { x: 5296.38, y: 1722.96 };
+  }, []);
+
   const activeFloorData = floorMapData?.[floor] || {};
   const activeMapMeta = activeFloorData.mapMeta || mapDetails;
   const rawWayfinding = activeFloorData.wayfindingData || wayfindingData;
   const activeWayfinding = useMemo(() => {
-    if (!rawWayfinding) return null;
-    const nodes =
-      rawWayfinding.nodes ||
-      rawWayfinding.wayfinding_path?.nodes ||
-      rawWayfinding.data?.nodes ||
+    let nodes =
+      rawWayfinding?.nodes ||
+      rawWayfinding?.wayfinding_path?.nodes ||
+      rawWayfinding?.data?.nodes ||
       [];
     let edges =
-      rawWayfinding.edges ||
-      rawWayfinding.wayfinding_path?.edges ||
-      rawWayfinding.data?.edges ||
+      rawWayfinding?.edges ||
+      rawWayfinding?.wayfinding_path?.edges ||
+      rawWayfinding?.data?.edges ||
       {};
 
-    if (Object.keys(edges).length === 0 && nodes.length > 0) {
+    // Normalize nodes (ensure each node has name, id, x, y)
+    nodes = nodes.map((n) => ({
+      ...n,
+      name: n.name || n.id,
+      id: n.id || n.name,
+      x: n.position?.x ?? n.x,
+      y: n.position?.y ?? n.y,
+    }));
+
+    // If edges is an array: [ { from, to }, { source, target } ] convert to adjacency map
+    if (Array.isArray(edges)) {
+      const converted = {};
+      edges.forEach((edge) => {
+        const u = edge.from || edge.source || edge.start;
+        const v = edge.to || edge.target || edge.end;
+        if (u && v) {
+          if (!converted[u]) converted[u] = {};
+          if (!converted[v]) converted[v] = {};
+          converted[u][v] = { weight: edge.weight || 1 };
+          converted[v][u] = { weight: edge.weight || 1 };
+        }
+      });
+      edges = converted;
+    } else if (Object.keys(edges).length === 0 && nodes.length > 0) {
       const extracted = {};
       nodes.forEach((n) => {
         if (n.edges) extracted[n.name] = n.edges;
       });
       edges = extracted;
     }
+
+    // Ground Floor: Use complete corridor wayfinding graph with Lift near AP19
+    if (floor === "GR") {
+      const baseNodes = DEFAULT_GR_WAYFINDING.nodes;
+      const baseEdges = DEFAULT_GR_WAYFINDING.edges;
+
+      const mergedNodesMap = new Map();
+      baseNodes.forEach((n) => mergedNodesMap.set(String(n.name || n.id), n));
+      (nodes || []).forEach((n) => {
+        const id = String(n.name || n.id);
+        if (!mergedNodesMap.has(id)) {
+          mergedNodesMap.set(id, n);
+        }
+      });
+
+      const mergedEdges = { ...baseEdges };
+      Object.keys(edges || {}).forEach((k) => {
+        if (!mergedEdges[k]) {
+          mergedEdges[k] = edges[k];
+        }
+      });
+
+      // Ensure corridor connectivity along vertical hallway and lift
+      mergedEdges.N7 = { N13: { weight: 1 }, N6: { weight: 1 } };
+      mergedEdges.N6 = { N7: { weight: 1 }, N8: { weight: 1 } };
+      mergedEdges.N8 = { N6: { weight: 1 }, N10: { weight: 1 } };
+      mergedEdges.N10 = { N8: { weight: 1 }, N4: { weight: 1 } };
+      mergedEdges.N4 = { N10: { weight: 1 }, N5: { weight: 1 } };
+      mergedEdges.NLift = { N12: { weight: 1 }, N13: { weight: 1 } };
+      mergedEdges.N12 = { ...(mergedEdges.N12 || {}), NLift: { weight: 1 } };
+      mergedEdges.N13 = { ...(mergedEdges.N13 || {}), NLift: { weight: 1 }, N7: { weight: 1 } };
+
+      return { nodes: Array.from(mergedNodesMap.values()), edges: mergedEdges };
+    }
+
     return { nodes, edges };
-  }, [rawWayfinding]);
+  }, [rawWayfinding, floor, grLiftPos]);
   const mapWidth = activeMapMeta?.width || 6400;
   const mapHeight = activeMapMeta?.height || 5120;
   const ppm = activeMapMeta?.ppm || 50.07391564392213;
@@ -392,27 +510,7 @@ export default function MapView2D({
 
   const isLiveFloor = floor === tagFloor;
 
-  // Resolve lift coordinates for GR (midpoint of N12 & N7)
-  const grLiftPos = useMemo(() => {
-    const grWf =
-      floorMapData?.GR?.wayfindingData ||
-      (floor === "GR" ? activeWayfinding : null);
-    const grNodes = grWf?.nodes || [];
-    const n12 = findWayfindingNode(grNodes, "12");
-    const n7 = findWayfindingNode(grNodes, "7");
 
-    if (n12 && n7) {
-      const p1 = n12.position || n12;
-      const p2 = n7.position || n7;
-      if (p1.x !== undefined && p2.x !== undefined) {
-        return {
-          x: (Number(p1.x) + Number(p2.x)) / 2,
-          y: (Number(p1.y) + Number(p2.y)) / 2,
-        };
-      }
-    }
-    return { x: 5004.59, y: 2313.4 };
-  }, [floorMapData, floor, activeWayfinding]);
 
   // Resolve lift coordinates for F1 (midpoint of N48 & N45)
   const f1LiftPos = useMemo(() => {
@@ -448,10 +546,12 @@ export default function MapView2D({
     let rawY = bleLocation?.y;
 
     if (bleLocation?.x_m != null && (rawX == null || rawX < 300)) {
-      rawX = bleLocation.x_m * ppm;
+      const ox = activeMapMeta?.origin_x ?? 306.45;
+      rawX = ox + bleLocation.x_m * ppm;
     }
     if (bleLocation?.y_m != null && (rawY == null || rawY < 300)) {
-      rawY = bleLocation.y_m * ppm;
+      const oy = activeMapMeta?.origin_y ?? 3856.48;
+      rawY = oy - bleLocation.y_m * ppm;
     }
 
     const isLiveLocation = bleLocation?.x != null || bleLocation?.x_m != null;
@@ -471,7 +571,7 @@ export default function MapView2D({
     }
 
     return { x: rawX, y: rawY };
-  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos, tagFloor]);
+  }, [isLiveFloor, floor, bleLocation, ppm, liftPos, f1LiftPos, tagFloor, activeMapMeta]);
 
   const reduxApMac = useSelector(
     (state) =>
@@ -558,18 +658,19 @@ export default function MapView2D({
   }, [hasValidTarget, effectiveTargetPos, transformCoords]);
 
   const backendWaypoints = useMemo(() => {
+    // Ground Floor: Route from live start position to Lift
     if (floor === "GR") {
       const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
         activeWayfinding?.edges || {},
         rawStartPos,
-        effectiveTargetPos,
+        grLiftPos,
       );
       console.log(`🧭 [MapView2D Route GR] Path generated via Dijkstra to Lift: ${path.length} waypoints`);
       return path;
     }
 
-    // On F1: if not on live floor (previewing from GR), route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
+    // F1 Preview from GR: Route starts from F1 Lift (N48 & N45 midpoint) to Target Cabinet
     if (floor === "F1" && !isLiveFloor) {
       const path = calculateDijkstraPath(
         activeWayfinding?.nodes || [],
@@ -581,26 +682,33 @@ export default function MapView2D({
       return path;
     }
 
-    // On F1 and live floor
+    // F1 Live: Prioritize live backend route
     const rawWaypoints =
       activeRoute?.waypoints || activeRoute?.nodes || activeRoute?.path;
     const extracted = extractWaypoints(rawWaypoints);
-    if (extracted.length === 0 && effectiveTargetPos) {
+    if (extracted.length > 0) {
+      console.log(`🟢 [MapView2D Route F1] Path Source: LIVE BACKEND MIST ROUTE (${extracted.length} waypoints)`);
+      return extracted;
+    }
+
+    // F1 Fallback client-side Dijkstra
+    if (effectiveTargetPos && activeWayfinding?.nodes?.length > 0) {
       const fallbackPath = calculateDijkstraPath(
-        activeWayfinding?.nodes || [],
-        activeWayfinding?.edges || {},
+        activeWayfinding.nodes,
+        activeWayfinding.edges || {},
         rawStartPos,
         effectiveTargetPos,
       );
-      console.log(`🟡 [MapView2D Route F1] Path Source: FALLBACK CLIENT DIJKSTRA (${fallbackPath.length} waypoints)`);
+      console.log(`🟡 [MapView2D Route F1] Path Source: CLIENT DIJKSTRA (${fallbackPath.length} waypoints)`);
       return fallbackPath;
     }
-    console.log(`🟢 [MapView2D Route F1] Path Source: LIVE BACKEND MIST ROUTE (${extracted.length} waypoints)`);
-    return extracted;
+
+    return [];
   }, [
     floor,
     isLiveFloor,
     f1LiftPos,
+    grLiftPos,
     effectiveTargetPos,
     activeWayfinding,
     rawStartPos,
@@ -639,8 +747,8 @@ export default function MapView2D({
         }
       }
 
-      // If within corridor radius (2.8 meters), snap to centerline
-      if (bestSnapped && bestSnapped.distMeters <= 2.8) {
+      // If within corridor radius (1.0 meter), snap to centerline
+      if (bestSnapped && bestSnapped.distMeters <= 1.0) {
         activeX = bestSnapped.x;
         activeY = bestSnapped.y;
       }
@@ -689,7 +797,16 @@ export default function MapView2D({
     }
     if (destPos) points.push(destPos);
     if (points.length < 2) return "";
-    return points.reduce(
+
+    // Deduplicate consecutive points
+    const cleanPoints = points.filter((pt, idx) => {
+      if (idx === 0) return true;
+      const prev = points[idx - 1];
+      return Math.hypot(pt.svgX - prev.svgX, pt.svgY - prev.svgY) > 0.5;
+    });
+
+    if (cleanPoints.length < 2) return "";
+    return cleanPoints.reduce(
       (acc, pt, idx) =>
         idx === 0
           ? `M ${pt.svgX} ${pt.svgY}`
@@ -703,21 +820,256 @@ export default function MapView2D({
     return liveRoutePathD;
   }, [floor, liveRoutePathD]);
 
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.35, 5.0));
-  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.35, 0.7));
-  const handleResetZoom = () => {
-    setZoom(3.2);
-    setPan({ x: -320, y: 0 });
-  };
-  const handleMouseDown = (e) => {
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-  };
-  const handleMouseMove = (e) => {
+  // Keep refs synchronized for native event listeners
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  // Mouse wheel zoom for PC (centered around mouse cursor)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - rect.width / 2;
+      const mouseY = e.clientY - rect.top - rect.height / 2;
+
+      const currentZoom = zoomRef.current;
+      const currentPan = panRef.current;
+
+      // Handle trackpad pinch (e.ctrlKey) or standard mouse wheel
+      let zoomFactor = 1;
+      if (e.ctrlKey) {
+        zoomFactor = Math.exp(-e.deltaY * 0.015);
+      } else {
+        zoomFactor = e.deltaY < 0 ? 1.18 : 0.85;
+      }
+
+      const newZoom = Math.min(Math.max(currentZoom * zoomFactor, 0.4), 10.0);
+      const scaleChange = newZoom / currentZoom;
+      const newPanX = mouseX - (mouseX - currentPan.x) * scaleChange;
+      const newPanY = mouseY - (mouseY - currentPan.y) * scaleChange;
+
+      setZoom(Number(newZoom.toFixed(3)));
+      setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
+
+  // Window-level mouse drag listeners for PC so pan never sticks
+  useEffect(() => {
     if (!isDragging) return;
-    setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+
+    const handleGlobalMouseMove = (e) => {
+      setPan({
+        x: Math.round(e.clientX - dragStartRef.current.x),
+        y: Math.round(e.clientY - dragStartRef.current.y),
+      });
+    };
+
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
+  }, [isDragging]);
+
+  // Pinch-to-zoom & touch-pan for Mobile and Tablets
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const getDistance = (t1, t2) => {
+      return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    };
+
+    const getMidpoint = (t1, t2, rect) => {
+      return {
+        x: (t1.clientX + t2.clientX) / 2 - rect.left - rect.width / 2,
+        y: (t1.clientY + t2.clientY) / 2 - rect.top - rect.height / 2,
+      };
+    };
+
+    const handleTouchStart = (e) => {
+      if (e.touches.length === 1) {
+        // Single finger: pan
+        const touch = e.touches[0];
+        touchStateRef.current = {
+          mode: "pan",
+          startX: touch.clientX,
+          startY: touch.clientY,
+          startPanX: panRef.current.x,
+          startPanY: panRef.current.y,
+          startDistance: 0,
+          startZoom: zoomRef.current,
+          midX: 0,
+          midY: 0,
+        };
+      } else if (e.touches.length >= 2) {
+        // Two fingers: pinch zoom + pan
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const rect = container.getBoundingClientRect();
+        const dist = getDistance(t1, t2);
+        const mid = getMidpoint(t1, t2, rect);
+
+        touchStateRef.current = {
+          mode: "pinch",
+          startX: mid.x,
+          startY: mid.y,
+          startPanX: panRef.current.x,
+          startPanY: panRef.current.y,
+          startDistance: dist,
+          startZoom: zoomRef.current,
+          midX: mid.x,
+          midY: mid.y,
+        };
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (e.cancelable) e.preventDefault();
+      const state = touchStateRef.current;
+
+      if (state.mode === "pan" && e.touches.length === 1) {
+        const touch = e.touches[0];
+        const dx = touch.clientX - state.startX;
+        const dy = touch.clientY - state.startY;
+        setPan({
+          x: Math.round(state.startPanX + dx),
+          y: Math.round(state.startPanY + dy),
+        });
+      } else if (e.touches.length >= 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const rect = container.getBoundingClientRect();
+        const dist = getDistance(t1, t2);
+        const currentMid = getMidpoint(t1, t2, rect);
+
+        if (state.mode !== "pinch") {
+          touchStateRef.current = {
+            mode: "pinch",
+            startX: currentMid.x,
+            startY: currentMid.y,
+            startPanX: panRef.current.x,
+            startPanY: panRef.current.y,
+            startDistance: dist,
+            startZoom: zoomRef.current,
+            midX: currentMid.x,
+            midY: currentMid.y,
+          };
+          return;
+        }
+
+        if (state.startDistance > 0) {
+          const ratio = dist / state.startDistance;
+          const newZoom = Math.min(Math.max(state.startZoom * ratio, 0.4), 10.0);
+
+          const scaleChange = newZoom / state.startZoom;
+          const dragX = currentMid.x - state.startX;
+          const dragY = currentMid.y - state.startY;
+          const newPanX =
+            state.midX - (state.midX - state.startPanX) * scaleChange + dragX;
+          const newPanY =
+            state.midY - (state.midY - state.startPanY) * scaleChange + dragY;
+
+          setZoom(Number(newZoom.toFixed(3)));
+          setPan({ x: Math.round(newPanX), y: Math.round(newPanY) });
+        }
+      }
+    };
+
+    const handleTouchEnd = (e) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        touchStateRef.current = {
+          mode: "pan",
+          startX: touch.clientX,
+          startY: touch.clientY,
+          startPanX: panRef.current.x,
+          startPanY: panRef.current.y,
+          startDistance: 0,
+          startZoom: zoomRef.current,
+          midX: 0,
+          midY: 0,
+        };
+      } else if (e.touches.length === 0) {
+        touchStateRef.current = { mode: "none" };
+      }
+    };
+
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    });
+    container.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+    });
+    container.addEventListener("touchend", handleTouchEnd, {
+      passive: false,
+    });
+    container.addEventListener("touchcancel", handleTouchEnd, {
+      passive: false,
+    });
+
+    return () => {
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, []);
+
+  const handleZoomIn = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setZoom((prev) => {
+      const next = Math.min(prev * 1.3, 10.0);
+      return Number(next.toFixed(2));
+    });
   };
-  const handleMouseUp = () => setIsDragging(false);
+
+  const handleZoomOut = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setZoom((prev) => {
+      const next = Math.max(prev / 1.3, 0.4);
+      return Number(next.toFixed(2));
+    });
+  };
+
+  const handleResetZoom = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+  };
 
   return (
     <div
@@ -757,12 +1109,10 @@ export default function MapView2D({
         viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
         style={{
           cursor: isDragging ? "grabbing" : "grab",
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "center center",
           transition: isDragging
             ? "none"
             : "transform 0.2s cubic-bezier(0.2, 0, 0, 1)",
@@ -771,13 +1121,13 @@ export default function MapView2D({
         <defs>
           <marker
             id="routeArrow"
-            markerWidth="3"
-            markerHeight="3"
-            refX="2"
-            refY="1.5"
+            markerWidth="2.5"
+            markerHeight="2.5"
+            refX="1.8"
+            refY="1.25"
             orient="auto"
           >
-            <path d="M 0 0 L 3 1.5 L 0 3 z" fill="#0085ff" />
+            <path d="M 0 0 L 2.5 1.25 L 0 2.5 z" fill="#0085ff" />
           </marker>
           <pattern
             id="gridPattern"
@@ -828,23 +1178,25 @@ export default function MapView2D({
         {activeWayfinding?.edges &&
           Object.keys(activeWayfinding.edges).map((sourceName) => {
             const sourceNode = activeWayfinding.nodes.find(
-              (n) => n.name === sourceName,
+              (n) => (n.name || n.id) === sourceName,
             );
             if (!sourceNode) return null;
-            const sourcePos = transformCoords(
-              sourceNode.position.x,
-              sourceNode.position.y,
-            );
+            const sX = sourceNode.position?.x ?? sourceNode.x;
+            const sY = sourceNode.position?.y ?? sourceNode.y;
+            if (sX === undefined || sY === undefined) return null;
+            const sourcePos = transformCoords(sX, sY);
+
             const targets = activeWayfinding.edges[sourceName];
             return Object.keys(targets).map((targetName) => {
               const targetNode = activeWayfinding.nodes.find(
-                (n) => n.name === targetName,
+                (n) => (n.name || n.id) === targetName,
               );
               if (!targetNode) return null;
-              const targetPos = transformCoords(
-                targetNode.position.x,
-                targetNode.position.y,
-              );
+              const tX = targetNode.position?.x ?? targetNode.x;
+              const tY = targetNode.position?.y ?? targetNode.y;
+              if (tX === undefined || tY === undefined) return null;
+              const targetPos = transformCoords(tX, tY);
+
               // Avoid duplicate lines (only draw if source < target alphabetically)
               if (sourceName > targetName) return null;
               return (
@@ -854,46 +1206,55 @@ export default function MapView2D({
                   y1={sourcePos.svgY}
                   x2={targetPos.svgX}
                   y2={targetPos.svgY}
-                  stroke="#94a3b8"
-                  strokeWidth="1.2"
-                  strokeDasharray="3 3"
+                  stroke="#0284c7"
+                  strokeWidth="1.0"
+                  strokeDasharray="2.5 2.5"
                   opacity="0.65"
                 />
               );
             });
           })}
 
-        {/* ---- WAYFINDING NODES: Small dots (temporary) ---- */}
+        {/* ---- WAYFINDING NODES: Dots with clear labels ---- */}
         {activeWayfinding?.nodes &&
           activeWayfinding.nodes.map((node) => {
-            if (!node.position) return null;
-            const { svgX, svgY } = transformCoords(
-              node.position.x,
-              node.position.y,
-            );
+            const nodeName = node.name || node.id;
+            const posX = node.position?.x ?? node.x;
+            const posY = node.position?.y ?? node.y;
+            if (posX === undefined || posY === undefined) return null;
+            const { svgX, svgY } = transformCoords(posX, posY);
             return (
-              <g key={node.name} transform={`translate(${svgX}, ${svgY})`}>
+              <g key={nodeName || `${posX}-${posY}`} transform={`translate(${svgX}, ${svgY})`}>
+                {/* Subtle Cyan Halo */}
                 <circle
-                  r="3.5"
-                  fill="#0ea5e9"
+                  r="3.2"
+                  fill="#0284c7"
+                  opacity="0.25"
+                />
+                {/* Dot */}
+                <circle
+                  r="1.6"
+                  fill="#0284c7"
                   stroke="#ffffff"
-                  strokeWidth="1"
+                  strokeWidth="0.5"
                   className="wayfinding-node"
                 />
+                {/* Compact Node Name Label */}
                 <text
                   x="0"
-                  y="-10"
-                  fill="#0f172a"
-                  fontSize="8"
+                  y="-3.2"
+                  fill="#0369a1"
+                  fontSize="3.2"
                   fontWeight="700"
                   textAnchor="middle"
                   style={{
                     paintOrder: "stroke",
                     stroke: "#ffffff",
-                    strokeWidth: "2px",
+                    strokeWidth: "0.8px",
+                    userSelect: "none",
                   }}
                 >
-                  {node.name}
+                  {nodeName}
                 </text>
               </g>
             );
@@ -906,7 +1267,7 @@ export default function MapView2D({
               d={liveRoutePathD}
               fill="none"
               stroke="rgba(0,133,255,0.2)"
-              strokeWidth="6"
+              strokeWidth="3.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -914,7 +1275,7 @@ export default function MapView2D({
               d={liveRoutePathD}
               fill="none"
               stroke="#0085ff"
-              strokeWidth="3"
+              strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
               markerEnd="url(#routeArrow)"
@@ -923,8 +1284,8 @@ export default function MapView2D({
               d={liveRoutePathD}
               fill="none"
               stroke="#ffffff"
-              strokeWidth="1.2"
-              strokeDasharray="4 4"
+              strokeWidth="0.8"
+              strokeDasharray="3 3"
               className="path-animated"
             />
           </g>
@@ -936,7 +1297,7 @@ export default function MapView2D({
               d={f1LiveRoutePathD}
               fill="none"
               stroke="rgba(0,133,255,0.2)"
-              strokeWidth="6"
+              strokeWidth="3.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -944,7 +1305,7 @@ export default function MapView2D({
               d={f1LiveRoutePathD}
               fill="none"
               stroke="#0085ff"
-              strokeWidth="3"
+              strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
               markerEnd="url(#routeArrow)"
@@ -953,50 +1314,27 @@ export default function MapView2D({
               d={f1LiveRoutePathD}
               fill="none"
               stroke="#ffffff"
-              strokeWidth="1.2"
-              strokeDasharray="4 4"
+              strokeWidth="0.8"
+              strokeDasharray="3 3"
               className="path-animated"
             />
           </g>
         )}
 
-        {/* ---- CONNECTED MIST AP TO LIVE LOCATION (Low Opacity Black Line) ---- */}
-        {isLiveFloor &&
-          startPos &&
-          connectedApPos &&
-          isFinite(startPos.svgX) &&
-          isFinite(startPos.svgY) &&
-          isFinite(connectedApPos.svgX) &&
-          isFinite(connectedApPos.svgY) && (
-            <line
-              x1={startPos.svgX}
-              y1={startPos.svgY}
-              x2={connectedApPos.svgX}
-              y2={connectedApPos.svgY}
-              stroke="#000000"
-              strokeOpacity="0.25"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              className="connected-mist-line"
-              style={{ pointerEvents: "none" }}
-            >
-              <title>{`Connected Mist: ${connectedAp?.name || connectedAp?.mac || "Mist AP"}`}</title>
-            </line>
-          )}
 
         {/* ---- VISITOR LIVE MARKER (Rendered ONLY on the visitor's current live floor) ---- */}
         {isLiveFloor && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
             {/* Outer Pulsing Aura */}
             <circle
-              r="12"
+              r="5.5"
               fill="#0085ff"
-              opacity="0.25"
+              opacity="0.22"
               className="ble-pulse-aura"
             />
             {/* Live Blue Location Disc */}
-            <circle r="6.5" fill="#0085ff" stroke="#ffffff" strokeWidth="1.5" />
-            <circle r="2" fill="#ffffff" />
+            <circle r="3" fill="#0085ff" stroke="#ffffff" strokeWidth="0.8" />
+            <circle r="1" fill="#ffffff" />
             {/* Directional Google Maps Arrow pointing to target waypoint */}
             {(destPos || (forwardWaypoints && forwardWaypoints.length > 0)) && (
               <g
@@ -1015,10 +1353,10 @@ export default function MapView2D({
                 })()})`}
               >
                 <polygon
-                  points="14,0 4,-5 6,0 4,5"
+                  points="7,0 2,-2.2 3.2,0 2,2.2"
                   fill="#0085ff"
                   stroke="#ffffff"
-                  strokeWidth="1"
+                  strokeWidth="0.5"
                 />
               </g>
             )}
@@ -1029,23 +1367,23 @@ export default function MapView2D({
         {!isLiveFloor && floor === "F1" && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
             <circle
-              r="12"
+              r="6"
               fill="#0284c7"
-              opacity="0.25"
+              opacity="0.22"
               className="ble-pulse-aura"
             />
-            <circle r="7" fill="#0284c7" stroke="#ffffff" strokeWidth="1.5" />
+            <circle r="3.2" fill="#0284c7" stroke="#ffffff" strokeWidth="0.8" />
             <text
               x="0"
-              y="-12"
+              y="-4.5"
               fill="#0369a1"
-              fontSize="9"
+              fontSize="2.8"
               fontWeight="800"
               textAnchor="middle"
               style={{
                 paintOrder: "stroke",
                 stroke: "#ffffff",
-                strokeWidth: "2px",
+                strokeWidth: "0.6px",
               }}
             >
               LIFT
@@ -1057,36 +1395,18 @@ export default function MapView2D({
           <g transform={`translate(${destPos.svgX}, ${destPos.svgY})`}>
             {/* Outer Red Target Halo */}
             <circle
-              r="14"
+              r="6"
               fill="#ef4444"
-              opacity="0.28"
+              opacity="0.25"
               className="ble-pulse-aura"
             />
             {/* Inner Red Target Pin Disc */}
-            <circle r="7.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1.5" />
-            <circle r="3" fill="#ffffff" />
+            <circle r="3.2" fill="#ef4444" stroke="#ffffff" strokeWidth="0.8" />
+            <circle r="1.2" fill="#ffffff" />
           </g>
         )}
 
-        {assets.map((asset) => {
-          if (asset.map_id !== activeMapMeta?.id) return null;
-          const pixelX = asset.position.x_m * ppm;
-          const pixelY = asset.position.y_m * ppm;
-          const { svgX, svgY } = transformCoords(pixelX, pixelY);
-          if (!isFinite(svgX) || !isFinite(svgY)) return null;
-          return (
-            <g key={asset.mac} transform={`translate(${svgX}, ${svgY})`}>
-              <circle
-                r="5"
-                fill="#f59e0b"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-                opacity="0.85"
-              />
-              <title>{asset.device_name || asset.mac}</title>
-            </g>
-          );
-        })}
+
 
         {/* ---- MIST AP LOCATIONS (Olive Green Dots with Name from ap_list.json) ---- */}
         {floorAps.map((ap) => {

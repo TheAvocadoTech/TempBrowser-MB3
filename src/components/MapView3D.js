@@ -23,6 +23,7 @@ import {
   Navigation,
   Crosshair,
 } from "lucide-react";
+import { DEFAULT_GR_WAYFINDING } from "./MapView2D";
 
 // Default calibrations per floor
 const DEFAULT_CALIBRATION = {
@@ -384,17 +385,22 @@ export default function MapView3D({
 
   const activeFloorWf = floorMapData?.[floor]?.wayfindingData || wayfindingData;
   const activeFloorNodes =
-    activeFloorWf?.nodes ||
-    activeFloorWf?.wayfinding_path?.nodes ||
-    activeFloorWf?.data?.nodes ||
-    [];
+    floor === "GR"
+      ? DEFAULT_GR_WAYFINDING.nodes
+      : (activeFloorWf?.nodes ||
+         activeFloorWf?.wayfinding_path?.nodes ||
+         activeFloorWf?.data?.nodes ||
+         []);
   let activeFloorEdges =
-    activeFloorWf?.edges ||
-    activeFloorWf?.wayfinding_path?.edges ||
-    activeFloorWf?.data?.edges ||
-    {};
+    floor === "GR"
+      ? DEFAULT_GR_WAYFINDING.edges
+      : (activeFloorWf?.edges ||
+         activeFloorWf?.wayfinding_path?.edges ||
+         activeFloorWf?.data?.edges ||
+         {});
 
   if (
+    floor !== "GR" &&
     Object.keys(activeFloorEdges).length === 0 &&
     activeFloorNodes.length > 0
   ) {
@@ -405,29 +411,10 @@ export default function MapView3D({
     activeFloorEdges = extracted;
   }
 
-  // Resolve lift coordinates for GR (midpoint of N12 & N7)
+  // Resolve lift coordinates for GR (Lift near AP19)
   const grLiftPos = useMemo(() => {
-    const grWf = floorMapData?.GR?.wayfindingData || (floor === "GR" ? wayfindingData : null);
-    const grNodes =
-      grWf?.nodes ||
-      grWf?.wayfinding_path?.nodes ||
-      grWf?.data?.nodes ||
-      [];
-    const n12 = findWayfindingNode(grNodes, "12");
-    const n7 = findWayfindingNode(grNodes, "7");
-
-    if (n12 && n7) {
-      const p1 = n12.position || n12;
-      const p2 = n7.position || n7;
-      if (p1.x !== undefined && p2.x !== undefined) {
-        return {
-          x: (Number(p1.x) + Number(p2.x)) / 2,
-          y: (Number(p1.y) + Number(p2.y)) / 2,
-        };
-      }
-    }
-    return { x: 5004.59, y: 2313.4 };
-  }, [floorMapData, floor, wayfindingData]);
+    return { x: 5296.38, y: 1722.96 };
+  }, []);
 
   // Resolve lift coordinates for F1 (midpoint of N48 & N45)
   const f1LiftPos = useMemo(() => {
@@ -1410,30 +1397,7 @@ export default function MapView3D({
       });
     }
 
-    // 9. Tracked Assets
-    if (assets && assets.length > 0) {
-      const assetGeom = new THREE.SphereGeometry(0.8, 16, 16);
-      const assetMat = new THREE.MeshStandardMaterial({
-        color: 0xf59e0b,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.4,
-      });
 
-      assets.forEach((asset) => {
-        if (asset.map_id !== mapDetails?.id) return;
-        const px = asset.position?.x_m;
-        const py = asset.position?.y_m;
-        if (px == null || py == null) return;
-
-        const pixelX = px * ppm;
-        const pixelY = py * ppm;
-        const pos3D = mapTo3D(pixelX, pixelY, 0.8);
-
-        const assetMesh = new THREE.Mesh(assetGeom, assetMat);
-        assetMesh.position.copy(pos3D);
-        markersGroup.add(assetMesh);
-      });
-    }
   }, [
     bleLocation,
     resolvedTargetPos,

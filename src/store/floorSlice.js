@@ -13,7 +13,7 @@ function getMistApForLocation(
   rawY,
   rawXM,
   rawYM,
-  ppm
+  ppm,
 ) {
   if (!Array.isArray(apList) || apList.length === 0) return null;
   const normTarget = normalizeMac(apMac);
@@ -32,8 +32,16 @@ function getMistApForLocation(
   const floorAps = apList.filter((ap) => {
     if (ap.x === undefined || ap.y === undefined) return false;
     if (mapId && ap.map_id === mapId) return true;
-    if (targetFloor === "GR" && (ap.name?.includes("-F00-") || ap.name?.includes("-GR-"))) return true;
-    if (targetFloor === "F1" && (ap.name?.includes("-F01-") || ap.name?.includes("-F1-"))) return true;
+    if (
+      targetFloor === "GR" &&
+      (ap.name?.includes("-F00-") || ap.name?.includes("-GR-"))
+    )
+      return true;
+    if (
+      targetFloor === "F1" &&
+      (ap.name?.includes("-F01-") || ap.name?.includes("-F1-"))
+    )
+      return true;
     return false;
   });
 
@@ -45,7 +53,9 @@ function getMistApForLocation(
     if (rawXM != null && rawYM != null && ap.x_m != null && ap.y_m != null) {
       d = Math.hypot(Number(rawXM) - ap.x_m, Number(rawYM) - ap.y_m);
     } else if (rawX != null && rawY != null && ap.x != null && ap.y != null) {
-      d = Math.hypot(Number(rawX) - ap.x, Number(rawY) - ap.y) / (ppm || 50.07391564392213);
+      d =
+        Math.hypot(Number(rawX) - ap.x, Number(rawY) - ap.y) /
+        (ppm || 50.07391564392213);
     }
     if (d !== undefined && d < minDist) {
       minDist = d;
@@ -176,13 +186,14 @@ export const floorSlice = createSlice({
         // Find associated Mist AP
         const mistAp = getMistApForLocation(
           effectiveApMac,
+
           mapId,
           currentFloor,
           rawX,
           rawY,
           rawXM,
           rawYM,
-          state.mapMeta?.ppm
+          state.mapMeta?.ppm,
         );
 
         // Calculate distance from incoming raw coordinates to Mist AP
@@ -200,7 +211,7 @@ export const floorSlice = createSlice({
           ) {
             distToMistMeters = Math.hypot(
               Number(rawXM) - mistAp.x_m,
-              Number(rawYM) - mistAp.y_m
+              Number(rawYM) - mistAp.y_m,
             );
           } else if (
             rawX !== null &&
@@ -214,7 +225,7 @@ export const floorSlice = createSlice({
           ) {
             const distPx = Math.hypot(
               Number(rawX) - mistAp.x,
-              Number(rawY) - mistAp.y
+              Number(rawY) - mistAp.y,
             );
             const activePpm =
               state.mapMeta?.ppm ||
@@ -224,8 +235,7 @@ export const floorSlice = createSlice({
           }
         }
 
-        const nearbyRadius = state.mistNearbyRadius ?? 3.0;
-        // Accept location only if nearby the Mist AP (within 3m radius)
+        const nearbyRadius = state.mistNearbyRadius ?? 10.0;
         const isNearbyMist =
           distToMistMeters === null || distToMistMeters <= nearbyRadius;
 
@@ -242,8 +252,8 @@ export const floorSlice = createSlice({
           isNaN(Number(rawRssi)) ||
           Number(rawRssi) > state.rssiThreshold;
 
-        // ONLY STORE raw locations that are NEARBY THE MIST (<= 3m)
-        if (isValidCoords && isNearbyMist) {
+        // ACCEPT ALL VALID COORDINATES from Mist BLE system
+        if (isValidCoords) {
           if (state.locationQueue.length === 0 || passesThreshold) {
             state.locationQueue.push({
               x: Number(rawX),
@@ -338,10 +348,10 @@ export const floorSlice = createSlice({
               queueCapacity: state.queueCapacity,
               rssiThreshold: state.rssiThreshold,
               distToMist: distToMistMeters,
-              isNearbyMist: true,
+              isNearbyMist: isNearbyMist,
             };
           } else {
-            // First valid nearby location
+            // First valid location
             state.visitorPos = {
               x: Number(rawX),
               y: Number(rawY),
@@ -367,27 +377,9 @@ export const floorSlice = createSlice({
               queueCapacity: state.queueCapacity,
               rssiThreshold: state.rssiThreshold,
               distToMist: distToMistMeters,
-              isNearbyMist: true,
+              isNearbyMist: isNearbyMist,
             };
           }
-        } else if (!isNearbyMist && distToMistMeters !== null) {
-          // Location is outside the 3m Mist radius - ignore/drop from queue
-          console.warn(
-            `⚠️ [Location Filter] Dropping raw location (${Number(rawX).toFixed(1)}, ${Number(rawY).toFixed(1)}): ` +
-            `${distToMistMeters.toFixed(2)}m from Mist AP "${mistAp?.name || mistAp?.mac || "AP"}" (exceeds ${nearbyRadius}m nearby radius)`
-          );
-
-          // Update diagnostics without overwriting visitorPos
-          state.bleSignal = {
-            ...state.bleSignal,
-            rssi: rawRssi,
-            raw_rssi: rawRssi,
-            beam: rawBeam,
-            ap_mac: rawApMac,
-            last_seen: responseData.location.last_seen ?? null,
-            distToMist: distToMistMeters,
-            isNearbyMist: false,
-          };
         } else if (isValidCoords && !state.visitorPos) {
           // If no mist AP was resolvable at all, store as fallback
           state.visitorPos = {
@@ -405,13 +397,17 @@ export const floorSlice = createSlice({
 
       // ---- MAP & TARGET ----
       const incomingTagFloor =
-        responseData.location?.map_id === "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
+        responseData.location?.map_id ===
+          "cfa55e13-794f-4081-b1b7-e35f1ea67325" ||
         responseData.map?.id === "cfa55e13-794f-4081-b1b7-e35f1ea67325"
           ? "F1"
           : "GR";
 
       // Detect if tag physically transitioned to a different floor
-      if (responseData.location?.map_id && state.tagFloor !== incomingTagFloor) {
+      if (
+        responseData.location?.map_id &&
+        state.tagFloor !== incomingTagFloor
+      ) {
         state.tagFloor = incomingTagFloor;
         // Auto-sync activeFloor when the tag physically arrives on a new floor
         state.activeFloor = incomingTagFloor;

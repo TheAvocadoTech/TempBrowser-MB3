@@ -164,6 +164,7 @@ html, body {
   border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
   user-select: none;
+  touch-action: none;
 }
 
 @media (min-width: 640px) {
@@ -300,6 +301,8 @@ html, body {
   width: 100%;
   height: 100%;
   display: block;
+  transform-origin: center center;
+  touch-action: none;
 }
 
 /* ============================================================
@@ -317,8 +320,8 @@ html, body {
 }
 
 @keyframes ble-beacon-pulse {
-  0% { r: 12px; opacity: 0.8; }
-  100% { r: 34px; opacity: 0; }
+  0% { r: 3px; opacity: 0.5; }
+  100% { r: 7px; opacity: 0; }
 }
 
 .ble-pulse-aura {
@@ -633,13 +636,25 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 20;
+  z-index: 50;
+  pointer-events: auto;
 }
 
 .map-zoom-btn {
   width: 38px !important;
   height: 38px !important;
   border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  transition: transform 0.15s ease, background-color 0.15s ease !important;
+}
+
+.map-zoom-btn:active {
+  transform: scale(0.92) !important;
 }
 
 /* On very small phones, shrink zoom buttons */
