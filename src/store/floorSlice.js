@@ -239,7 +239,7 @@ export const floorSlice = createSlice({
         const isNearbyMist =
           distToMistMeters === null || distToMistMeters <= nearbyRadius;
 
-        // Queue logic
+        // Direct coordinate update without RSSI threshold (Filter A) or moving average queue (Filter B)
         const isValidCoords =
           rawX !== undefined &&
           rawX !== null &&
@@ -247,147 +247,56 @@ export const floorSlice = createSlice({
           rawY !== undefined &&
           rawY !== null &&
           !isNaN(Number(rawY));
-        const passesThreshold =
-          rawRssi === null ||
-          isNaN(Number(rawRssi)) ||
-          Number(rawRssi) > state.rssiThreshold;
 
-        // ACCEPT ALL VALID COORDINATES from Mist BLE system
         if (isValidCoords) {
-          if (state.locationQueue.length === 0 || passesThreshold) {
-            state.locationQueue.push({
-              x: Number(rawX),
-              y: Number(rawY),
-              x_m:
-                rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
-              y_m:
-                rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
-              rssi:
-                rawRssi !== null && !isNaN(Number(rawRssi))
-                  ? Number(rawRssi)
-                  : null,
-              distToMist: distToMistMeters,
-              timestamp: responseData.location.last_seen || Date.now(),
-            });
-          }
+          const directX = Number(rawX);
+          const directY = Number(rawY);
+          const directXM =
+            rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null;
+          const directYM =
+            rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null;
+          const directRssi =
+            rawRssi !== null && !isNaN(Number(rawRssi))
+              ? Number(rawRssi)
+              : null;
 
-          if (state.locationQueue.length > state.queueCapacity) {
-            state.locationQueue = state.locationQueue.slice(
-              -state.queueCapacity,
-            );
-          }
+          state.visitorPos = {
+            x: directX,
+            y: directY,
+            x_m: directXM,
+            y_m: directYM,
+            rssi: directRssi,
+            beam: rawBeam,
+            ap_mac: rawApMac,
+            distToMist: distToMistMeters,
+          };
 
-          // Weighted averaging with responsive recent bias
-          const qLength = state.locationQueue.length;
-          if (qLength > 0) {
-            const weights = [];
-            let sumWeight = 0;
-            for (let i = 0; i < qLength; i++) {
-              const w = Math.pow(0.75, qLength - 1 - i); // Faster response to recent changes
-              weights.push(w);
-              sumWeight += w;
-            }
-
-            let sumX = 0,
-              sumY = 0,
-              sumXM = 0,
-              sumYM = 0,
-              sumRssi = 0;
-            let countXM = 0,
-              countYM = 0,
-              countRssi = 0;
-
-            for (let i = 0; i < qLength; i++) {
-              const item = state.locationQueue[i];
-              const w = weights[i];
-              sumX += item.x * w;
-              sumY += item.y * w;
-              if (item.x_m !== null) {
-                sumXM += item.x_m * w;
-                countXM += w;
-              }
-              if (item.y_m !== null) {
-                sumYM += item.y_m * w;
-                countYM += w;
-              }
-              if (item.rssi !== null) {
-                sumRssi += item.rssi * w;
-                countRssi += w;
-              }
-            }
-
-            const avgX = sumX / sumWeight;
-            const avgY = sumY / sumWeight;
-            const avgXM = countXM > 0 ? sumXM / countXM : null;
-            const avgYM = countYM > 0 ? sumYM / countYM : null;
-            const avgRssi =
-              countRssi > 0 ? Math.round(sumRssi / countRssi) : rawRssi;
-
-            state.visitorPos = {
-              x: avgX,
-              y: avgY,
-              x_m: avgXM,
-              y_m: avgYM,
-              rssi: avgRssi,
-              beam: rawBeam,
-              ap_mac: rawApMac,
-              distToMist: distToMistMeters,
-            };
-
-            state.bleSignal = {
-              rssi: avgRssi,
-              raw_rssi: rawRssi,
-              beam: rawBeam,
-              ap_mac: rawApMac,
-              last_seen: responseData.location.last_seen ?? null,
-              x: avgX,
-              y: avgY,
-              x_m: avgXM,
-              y_m: avgYM,
-              queueSize: qLength,
-              queueCapacity: state.queueCapacity,
-              rssiThreshold: state.rssiThreshold,
-              distToMist: distToMistMeters,
-              isNearbyMist: isNearbyMist,
-            };
-          } else {
-            // First valid location
-            state.visitorPos = {
-              x: Number(rawX),
-              y: Number(rawY),
-              x_m: rawXM,
-              y_m: rawYM,
-              rssi: rawRssi,
-              beam: rawBeam,
-              ap_mac: rawApMac,
-              distToMist: distToMistMeters,
-            };
-
-            state.bleSignal = {
-              rssi: rawRssi,
-              raw_rssi: rawRssi,
-              beam: rawBeam,
-              ap_mac: rawApMac,
-              last_seen: responseData.location.last_seen ?? null,
-              x: Number(rawX),
-              y: Number(rawY),
-              x_m: rawXM,
-              y_m: rawYM,
-              queueSize: 1,
-              queueCapacity: state.queueCapacity,
-              rssiThreshold: state.rssiThreshold,
-              distToMist: distToMistMeters,
-              isNearbyMist: isNearbyMist,
-            };
-          }
+          state.bleSignal = {
+            rssi: directRssi,
+            raw_rssi: rawRssi,
+            beam: rawBeam,
+            ap_mac: rawApMac,
+            last_seen: responseData.location.last_seen ?? null,
+            x: directX,
+            y: directY,
+            x_m: directXM,
+            y_m: directYM,
+            queueSize: 1,
+            queueCapacity: state.queueCapacity,
+            rssiThreshold: state.rssiThreshold,
+            distToMist: distToMistMeters,
+            isNearbyMist: isNearbyMist,
+          };
         } else if (isValidCoords && !state.visitorPos) {
-          // If no mist AP was resolvable at all, store as fallback
           state.visitorPos = {
             x: Number(rawX),
             y: Number(rawY),
-            x_m: rawXM,
-            y_m: rawYM,
-            rssi: rawRssi,
+            x_m: rawXM !== null && !isNaN(Number(rawXM)) ? Number(rawXM) : null,
+            y_m: rawYM !== null && !isNaN(Number(rawYM)) ? Number(rawYM) : null,
+            rssi:
+              rawRssi !== null && !isNaN(Number(rawRssi))
+                ? Number(rawRssi)
+                : null,
             beam: rawBeam,
             ap_mac: rawApMac,
             distToMist: null,
