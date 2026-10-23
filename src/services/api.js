@@ -1,10 +1,12 @@
 import axios from "axios";
 //
 
-// Base URL points to local running backend or REACT_APP_API_URL
+// Base URL points to REACT_APP_API_URL or remote production endpoint
 const configuredUrl =
-  process.env.REACT_APP_API_URL || "http://localhost:8000/api/IDVisitor";
-const rawBaseUrl = configuredUrl.replace(/^https:\/\/localhost/i, "http://localhost").replace(/^https:\/\/127\.0\.0\.1/i, "http://127.0.0.1");
+  process.env.REACT_APP_API_URL || "https://api.avocadotech.in/api/IDVisitor";
+const rawBaseUrl = configuredUrl
+  .replace(/^https:\/\/localhost/i, "http://localhost")
+  .replace(/^https:\/\/127\.0\.0\.1/i, "http://127.0.0.1");
 
 const API_BASE_URL = rawBaseUrl.endsWith("/IDVisitor")
   ? rawBaseUrl
@@ -17,29 +19,6 @@ const apiClient = axios.create({
     "Content-Type": "application/json",
   },
 });
-
-// Automatic fallback to local backend if remote API is unreachable or returns 404/5xx
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const config = error.config;
-    if (!config || config._isRetry) {
-      return Promise.reject(error);
-    }
-
-    const isRemote = config.baseURL && !config.baseURL.includes("localhost:8000");
-    if (isRemote) {
-      config._isRetry = true;
-      config.baseURL = "http://localhost:8000/api/IDVisitor";
-      try {
-        return await axios(config);
-      } catch (localErr) {
-        return Promise.reject(localErr);
-      }
-    }
-    return Promise.reject(error);
-  }
-);
 
 let cachedVisitorId = null;
 
