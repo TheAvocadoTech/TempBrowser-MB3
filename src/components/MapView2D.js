@@ -1373,7 +1373,6 @@ export default function MapView2D({
           </g>
         )}
 
-
         {/* ---- VISITOR LIVE MARKER ---- */}
         {isLiveFloor && startPos && (
           <g transform={`translate(${startPos.svgX}, ${startPos.svgY})`}>
